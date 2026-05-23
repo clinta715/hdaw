@@ -1,0 +1,31 @@
+[package]
+name = "hdaw"
+version = "0.1.0"
+edition = "2021"
+description = "HDAW - Digital Audio Workstation"
+authors = ["Hap"]
+license = "MIT"
+
+[dependencies]
+# GUI Framework
+slint = "1.16"
+
+# Audio I/O
+cpal = "0.16"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+ron = "0.12"
+
+# Async
+tokio = { version = "1.0", features = ["rt-multi-thread", "sync"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# UUID for unique IDs
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+[profile.release]
+opt-level = 3
