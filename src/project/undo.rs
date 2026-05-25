@@ -1,10 +1,12 @@
+use crate::project::bus::Bus;
 use crate::project::clip::AudioClip;
-use crate::project::track::Track;
+use crate::project::track::{EffectInstance, Track};
 use crate::project::Project;
 use uuid::Uuid;
 
 pub type ClipSnapshot = AudioClip;
 pub type TrackSnapshot = Track;
+pub type BusSnapshot = Bus;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FadeEdge {
@@ -18,6 +20,9 @@ pub enum CoalesceKey {
     Pan(Uuid),
     Fade(Uuid, FadeEdge),
     TimeStretch(Uuid),
+    BusVolume(Uuid),
+    BusPan(Uuid),
+    EffectParam(Uuid, bool, usize, String),
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +32,11 @@ pub enum EditCommand {
         clip_id: Uuid,
         old_pos: u64,
         new_pos: u64,
+    },
+    MoveClipToTrack {
+        source_track_id: Uuid,
+        dest_track_id: Uuid,
+        clip_snapshot: ClipSnapshot,
     },
     ResizeClip {
         track_id: Uuid,
@@ -55,6 +65,16 @@ pub enum EditCommand {
         old_val: f32,
         new_val: f32,
     },
+    ChangeBusVolume {
+        bus_id: Uuid,
+        old_val: f32,
+        new_val: f32,
+    },
+    ChangeBusPan {
+        bus_id: Uuid,
+        old_val: f32,
+        new_val: f32,
+    },
     SetFade {
         track_id: Uuid,
         clip_id: Uuid,
@@ -78,6 +98,50 @@ pub enum EditCommand {
         snapshot: TrackSnapshot,
         index: usize,
     },
+    RemoveBus {
+        snapshot: BusSnapshot,
+        index: usize,
+    },
+    AddClip {
+        track_id: Uuid,
+        clip: ClipSnapshot,
+    },
+    RemoveClip {
+        track_id: Uuid,
+        clip: ClipSnapshot,
+    },
+
+    AddEffect {
+        target_id: Uuid,
+        is_track: bool,
+        effect: EffectInstance,
+        index: usize,
+    },
+    RemoveEffect {
+        target_id: Uuid,
+        is_track: bool,
+        effect: EffectInstance,
+        index: usize,
+    },
+    ChangeEffectParam {
+        target_id: Uuid,
+        is_track: bool,
+        effect_index: usize,
+        param_name: String,
+        old_val: f32,
+        new_val: f32,
+    },
+    MoveEffect {
+        target_id: Uuid,
+        is_track: bool,
+        from_index: usize,
+        to_index: usize,
+    },
+    ToggleEffectBypass {
+        target_id: Uuid,
+        is_track: bool,
+        effect_index: usize,
+    },
 }
 
 impl EditCommand {
@@ -91,6 +155,11 @@ impl EditCommand {
             EditCommand::TimeStretch { track_id, clip_id: _, .. } => {
                 Some(CoalesceKey::TimeStretch(*track_id))
             }
+            EditCommand::ChangeBusVolume { bus_id, .. } => Some(CoalesceKey::BusVolume(*bus_id)),
+            EditCommand::ChangeBusPan { bus_id, .. } => Some(CoalesceKey::BusPan(*bus_id)),
+            EditCommand::ChangeEffectParam { target_id, is_track, effect_index, param_name, .. } => {
+                Some(CoalesceKey::EffectParam(*target_id, *is_track, *effect_index, param_name.clone()))
+            }
             _ => None,
         }
     }
@@ -100,22 +169,38 @@ fn find_track_mut(project: &mut Project, track_id: Uuid) -> Option<&mut Track> {
     project.tracks.iter_mut().find(|t| t.id == track_id)
 }
 
-fn find_clip_mut<'a>(track: &'a mut Track, clip_id: Uuid) -> Option<&'a mut AudioClip> {
-    track.clips.iter_mut().find(|c| c.id == clip_id)
+fn find_bus_mut(project: &mut Project, bus_id: Uuid) -> Option<&mut Bus> {
+    project.buses.iter_mut().find(|b| b.id == bus_id)
+}
+
+fn get_effects_chain_mut<'a>(project: &'a mut Project, target_id: Uuid, is_track: bool) -> Option<&'a mut Vec<EffectInstance>> {
+    if is_track {
+        find_track_mut(project, target_id).map(|t| &mut t.effects_chain)
+    } else {
+        find_bus_mut(project, target_id).map(|b| &mut b.effects_chain)
+    }
 }
 
 pub fn execute_command(project: &mut Project, cmd: &EditCommand) {
     match cmd {
         EditCommand::MoveClip { track_id, clip_id, new_pos, .. } => {
             if let Some(track) = find_track_mut(project, *track_id) {
-                if let Some(clip) = find_clip_mut(track, *clip_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                     clip.position = *new_pos;
                 }
             }
         }
+        EditCommand::MoveClipToTrack { source_track_id, dest_track_id, clip_snapshot } => {
+            if let Some(track) = find_track_mut(project, *source_track_id) {
+                track.clips.retain(|c| c.id != clip_snapshot.id);
+            }
+            if let Some(track) = find_track_mut(project, *dest_track_id) {
+                track.add_clip(clip_snapshot.clone());
+            }
+        }
         EditCommand::ResizeClip { track_id, clip_id, new_start, new_end, .. } => {
             if let Some(track) = find_track_mut(project, *track_id) {
-                if let Some(clip) = find_clip_mut(track, *clip_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                     clip.offset = *new_start;
                     clip.length = new_end.saturating_sub(*new_start);
                 }
@@ -147,7 +232,7 @@ pub fn execute_command(project: &mut Project, cmd: &EditCommand) {
         }
         EditCommand::SetFade { track_id, clip_id, edge, new_dur, .. } => {
             if let Some(track) = find_track_mut(project, *track_id) {
-                if let Some(clip) = find_clip_mut(track, *clip_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                     match edge {
                         FadeEdge::In => clip.fade_in = *new_dur,
                         FadeEdge::Out => clip.fade_out = *new_dur,
@@ -157,7 +242,7 @@ pub fn execute_command(project: &mut Project, cmd: &EditCommand) {
         }
         EditCommand::TimeStretch { track_id, clip_id, new_length, new_stretch, .. } => {
             if let Some(track) = find_track_mut(project, *track_id) {
-                if let Some(clip) = find_clip_mut(track, *clip_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                     clip.length = *new_length;
                     clip.time_stretch = new_stretch.clone();
                 }
@@ -169,7 +254,69 @@ pub fn execute_command(project: &mut Project, cmd: &EditCommand) {
             let idx = (*index).min(project.tracks.len());
             project.tracks.insert(idx, track);
         }
-        EditCommand::RemoveTrack { .. } => {}
+        EditCommand::RemoveTrack { index, snapshot: _ } => {
+            if *index < project.tracks.len() {
+                project.tracks.remove(*index);
+            }
+        }
+        EditCommand::RemoveBus { index, snapshot: _ } => {
+            if *index < project.buses.len() {
+                project.buses.remove(*index);
+            }
+        }
+        EditCommand::AddClip { track_id, clip } => {
+            if let Some(track) = find_track_mut(project, *track_id) {
+                track.add_clip(clip.clone());
+            }
+        }
+        EditCommand::RemoveClip { track_id, clip } => {
+            if let Some(track) = find_track_mut(project, *track_id) {
+                track.clips.retain(|c| c.id != clip.id);
+            }
+        }
+        EditCommand::AddEffect { target_id, is_track, effect, index } => {
+            if let Some(chain) = get_effects_chain_mut(project, *target_id, *is_track) {
+                let idx = (*index).min(chain.len());
+                chain.insert(idx, effect.clone());
+            }
+        }
+        EditCommand::RemoveEffect { target_id, is_track, effect, .. } => {
+            if let Some(chain) = get_effects_chain_mut(project, *target_id, *is_track) {
+                chain.retain(|e| e.id != effect.id);
+            }
+        }
+        EditCommand::ChangeEffectParam { target_id, is_track, effect_index, param_name, new_val, .. } => {
+            if let Some(chain) = get_effects_chain_mut(project, *target_id, *is_track) {
+                if let Some(effect) = chain.get_mut(*effect_index) {
+                    effect.parameters.insert(param_name.clone(), *new_val);
+                }
+            }
+        }
+        EditCommand::MoveEffect { target_id, is_track, from_index, to_index } => {
+            if let Some(chain) = get_effects_chain_mut(project, *target_id, *is_track) {
+                if *from_index < chain.len() && *to_index < chain.len() {
+                    let effect = chain.remove(*from_index);
+                    chain.insert(*to_index, effect);
+                }
+            }
+        }
+        EditCommand::ToggleEffectBypass { target_id, is_track, effect_index } => {
+            if let Some(chain) = get_effects_chain_mut(project, *target_id, *is_track) {
+                if let Some(effect) = chain.get_mut(*effect_index) {
+                    effect.bypass = !effect.bypass;
+                }
+            }
+        }
+        EditCommand::ChangeBusVolume { bus_id, new_val, .. } => {
+            if let Some(bus) = find_bus_mut(project, *bus_id) {
+                bus.volume = *new_val;
+            }
+        }
+        EditCommand::ChangeBusPan { bus_id, new_val, .. } => {
+            if let Some(bus) = find_bus_mut(project, *bus_id) {
+                bus.pan = *new_val;
+            }
+        }
     }
 }
 
@@ -177,14 +324,22 @@ pub fn undo_command(project: &mut Project, cmd: &EditCommand) {
     match cmd {
         EditCommand::MoveClip { track_id, clip_id, old_pos, .. } => {
             if let Some(track) = find_track_mut(project, *track_id) {
-                if let Some(clip) = find_clip_mut(track, *clip_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                     clip.position = *old_pos;
                 }
             }
         }
+        EditCommand::MoveClipToTrack { source_track_id, dest_track_id, clip_snapshot } => {
+            if let Some(track) = find_track_mut(project, *dest_track_id) {
+                track.clips.retain(|c| c.id != clip_snapshot.id);
+            }
+            if let Some(track) = find_track_mut(project, *source_track_id) {
+                track.add_clip(clip_snapshot.clone());
+            }
+        }
         EditCommand::ResizeClip { track_id, clip_id, old_start, old_end, .. } => {
             if let Some(track) = find_track_mut(project, *track_id) {
-                if let Some(clip) = find_clip_mut(track, *clip_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                     clip.offset = *old_start;
                     clip.length = old_end.saturating_sub(*old_start);
                 }
@@ -216,7 +371,7 @@ pub fn undo_command(project: &mut Project, cmd: &EditCommand) {
         }
         EditCommand::SetFade { track_id, clip_id, edge, old_dur, .. } => {
             if let Some(track) = find_track_mut(project, *track_id) {
-                if let Some(clip) = find_clip_mut(track, *clip_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                     match edge {
                         FadeEdge::In => clip.fade_in = *old_dur,
                         FadeEdge::Out => clip.fade_out = *old_dur,
@@ -226,7 +381,7 @@ pub fn undo_command(project: &mut Project, cmd: &EditCommand) {
         }
         EditCommand::TimeStretch { track_id, clip_id, old_length, old_stretch, .. } => {
             if let Some(track) = find_track_mut(project, *track_id) {
-                if let Some(clip) = find_clip_mut(track, *clip_id) {
+                if let Some(clip) = track.clips.iter_mut().find(|c| c.id == *clip_id) {
                     clip.length = *old_length;
                     clip.time_stretch = old_stretch.clone();
                 }
@@ -242,6 +397,64 @@ pub fn undo_command(project: &mut Project, cmd: &EditCommand) {
             let mut track = snapshot.clone();
             track.clips = snapshot.clips.clone();
             project.tracks.insert(idx, track);
+        }
+        EditCommand::RemoveBus { snapshot, index } => {
+            let idx = (*index).min(project.buses.len());
+            project.buses.insert(idx, snapshot.clone());
+        }
+        EditCommand::AddClip { track_id, clip } => {
+            if let Some(track) = find_track_mut(project, *track_id) {
+                track.clips.retain(|c| c.id != clip.id);
+            }
+        }
+        EditCommand::RemoveClip { track_id, clip } => {
+            if let Some(track) = find_track_mut(project, *track_id) {
+                track.add_clip(clip.clone());
+            }
+        }
+        EditCommand::AddEffect { target_id, is_track, effect, .. } => {
+            if let Some(chain) = get_effects_chain_mut(project, *target_id, *is_track) {
+                chain.retain(|e| e.id != effect.id);
+            }
+        }
+        EditCommand::RemoveEffect { target_id, is_track, effect, index } => {
+            if let Some(chain) = get_effects_chain_mut(project, *target_id, *is_track) {
+                let idx = (*index).min(chain.len());
+                chain.insert(idx, effect.clone());
+            }
+        }
+        EditCommand::ChangeEffectParam { target_id, is_track, effect_index, param_name, old_val, .. } => {
+            if let Some(chain) = get_effects_chain_mut(project, *target_id, *is_track) {
+                if let Some(effect) = chain.get_mut(*effect_index) {
+                    effect.parameters.insert(param_name.clone(), *old_val);
+                }
+            }
+        }
+        EditCommand::MoveEffect { target_id, is_track, from_index, to_index } => {
+            if let Some(chain) = get_effects_chain_mut(project, *target_id, *is_track) {
+                if *to_index < chain.len() && *from_index < chain.len() {
+                    let effect = chain.remove(*to_index);
+                    let idx = (*from_index).min(chain.len());
+                    chain.insert(idx, effect);
+                }
+            }
+        }
+        EditCommand::ToggleEffectBypass { target_id, is_track, effect_index } => {
+            if let Some(chain) = get_effects_chain_mut(project, *target_id, *is_track) {
+                if let Some(effect) = chain.get_mut(*effect_index) {
+                    effect.bypass = !effect.bypass;
+                }
+            }
+        }
+        EditCommand::ChangeBusVolume { bus_id, old_val, .. } => {
+            if let Some(bus) = find_bus_mut(project, *bus_id) {
+                bus.volume = *old_val;
+            }
+        }
+        EditCommand::ChangeBusPan { bus_id, old_val, .. } => {
+            if let Some(bus) = find_bus_mut(project, *bus_id) {
+                bus.pan = *old_val;
+            }
         }
     }
 }
@@ -260,6 +473,11 @@ impl UndoStack {
             commands: Vec::with_capacity(MAX_UNDO_DEPTH),
             cursor: 0,
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.commands.clear();
+        self.cursor = 0;
     }
 
     pub fn push(&mut self, cmd: EditCommand) {

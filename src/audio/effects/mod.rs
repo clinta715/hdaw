@@ -2,6 +2,7 @@ pub mod eq;
 pub mod compressor;
 pub mod reverb;
 pub mod delay;
+pub mod factory;
 
 use crate::audio::buffer::AudioBuffer;
 

@@ -9,10 +9,11 @@ pub struct Compressor {
     makeup: f32,
     bypassed: bool,
     envelope: f32,
+    sample_rate: u32,
 }
 
 impl Compressor {
-    pub fn new() -> Self {
+    pub fn new(sample_rate: u32) -> Self {
         Self {
             threshold: -20.0,
             ratio: 4.0,
@@ -21,6 +22,7 @@ impl Compressor {
             makeup: 0.0,
             bypassed: false,
             envelope: 0.0,
+            sample_rate,
         }
     }
 }
@@ -31,8 +33,9 @@ impl Effect for Compressor {
             return;
         }
 
-        let attack_coef = (-1.0 / (self.attack * 44100.0)).exp();
-        let release_coef = (-1.0 / (self.release * 44100.0)).exp();
+        let sr = self.sample_rate.max(1) as f32;
+        let attack_coef = (-1.0 / (self.attack * sr)).exp();
+        let release_coef = (-1.0 / (self.release * sr)).exp();
 
         for sample in &mut buffer.samples {
             let input_level = sample.abs();
@@ -92,6 +95,6 @@ impl Effect for Compressor {
 
 impl Default for Compressor {
     fn default() -> Self {
-        Self::new()
+        Self::new(44100)
     }
 }
