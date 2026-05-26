@@ -13,6 +13,7 @@ pub trait Effect: Send + Sync {
     fn get_name(&self) -> &str;
     fn is_bypassed(&self) -> bool;
     fn set_bypassed(&mut self, bypassed: bool);
+    fn get_gain_reduction(&self) -> f32 { 0.0 }
 }
 
 pub mod params {

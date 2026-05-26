@@ -1,5 +1,6 @@
 use crate::audio::effects::Effect;
 use crate::project::clip::AudioClip;
+use crate::project::automation::AutomationLane;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -14,9 +15,34 @@ pub struct Track {
     pub mute: bool,
     pub solo: bool,
     pub armed: bool,
+    pub input_monitoring: bool,
+    pub output_id: Option<Uuid>,
+    pub sends: Vec<AuxSend>,
     pub clips: Vec<AudioClip>,
     pub effects_chain: Vec<EffectInstance>,
     pub automation: HashMap<String, AutomationLane>,
+    pub selected_automation_param: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuxSend {
+    pub id: Uuid,
+    pub target_id: Uuid,
+    pub level: f32,
+    pub is_active: bool,
+    pub pre_fader: bool,
+}
+
+impl AuxSend {
+    pub fn new(target_id: Uuid) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            target_id,
+            level: 1.0,
+            is_active: true,
+            pre_fader: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,28 +51,6 @@ pub struct EffectInstance {
     pub effect_type: String,
     pub bypass: bool,
     pub parameters: HashMap<String, f32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutomationLane {
-    pub parameter_path: String,
-    pub points: Vec<AutomationPoint>,
-    pub enabled: bool,
-    pub color: (u8, u8, u8),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AutomationPoint {
-    pub time: f64,
-    pub value: f32,
-    pub curve: CurveType,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CurveType {
-    Linear,
-    Bezier(f32, f32),
-    Step,
 }
 
 impl Track {
@@ -60,9 +64,13 @@ impl Track {
             mute: false,
             solo: false,
             armed: false,
+            input_monitoring: false,
+            output_id: None,
+            sends: Vec::new(),
             clips: Vec::new(),
             effects_chain: Vec::new(),
             automation: HashMap::new(),
+            selected_automation_param: None,
         }
     }
 

@@ -1,6 +1,27 @@
 use crate::audio::buffer::AudioBuffer;
 use std::path::Path;
 
+#[derive(Debug, Clone)]
+pub struct WavMetadata {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bit_depth: u16,
+    pub duration_secs: f64,
+}
+
+pub fn load_wav_metadata(path: &Path) -> Result<WavMetadata, String> {
+    let reader = hound::WavReader::open(path).map_err(|e| format!("Failed to open WAV: {}", e))?;
+    let spec = reader.spec();
+    let num_samples = reader.duration() as usize;
+    let duration_secs = num_samples as f64 / spec.sample_rate as f64 / spec.channels as f64;
+    Ok(WavMetadata {
+        sample_rate: spec.sample_rate,
+        channels: spec.channels,
+        bit_depth: spec.bits_per_sample,
+        duration_secs,
+    })
+}
+
 pub fn load_wav(path: &Path) -> Result<AudioBuffer, String> {
     let reader = hound::WavReader::open(path).map_err(|e| format!("Failed to open WAV: {}", e))?;
     let spec = reader.spec();

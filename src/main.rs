@@ -4,6 +4,7 @@ mod app;
 mod audio;
 mod ui;
 mod project;
+mod utils;
 
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};

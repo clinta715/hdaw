@@ -10,6 +10,7 @@ pub struct Compressor {
     bypassed: bool,
     envelope: f32,
     sample_rate: u32,
+    pub last_gain_reduction: f32,
 }
 
 impl Compressor {
@@ -23,6 +24,7 @@ impl Compressor {
             bypassed: false,
             envelope: 0.0,
             sample_rate,
+            last_gain_reduction: 0.0,
         }
     }
 }
@@ -36,6 +38,8 @@ impl Effect for Compressor {
         let sr = self.sample_rate.max(1) as f32;
         let attack_coef = (-1.0 / (self.attack * sr)).exp();
         let release_coef = (-1.0 / (self.release * sr)).exp();
+
+        let mut max_gr = 0.0f32;
 
         for sample in &mut buffer.samples {
             let input_level = sample.abs();
@@ -53,9 +57,13 @@ impl Effect for Compressor {
                 0.0
             };
 
+            if gain_reduction < max_gr { max_gr = gain_reduction; }
+
             let linear_gain = 10.0_f32.powf(gain_reduction / 20.0) * 10.0_f32.powf(self.makeup / 20.0);
             *sample *= linear_gain;
         }
+
+        self.last_gain_reduction = max_gr;
     }
 
     fn get_parameter(&self, name: &str) -> Option<f32> {
@@ -90,6 +98,10 @@ impl Effect for Compressor {
 
     fn set_bypassed(&mut self, bypassed: bool) {
         self.bypassed = bypassed;
+    }
+
+    fn get_gain_reduction(&self) -> f32 {
+        self.last_gain_reduction
     }
 }
 

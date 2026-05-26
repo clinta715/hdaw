@@ -27,5 +27,21 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # UUID for unique IDs
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
+# Audio file loading
+hound = "3.5"
+
+# File dialog
+rfd = "0.15"
+
+# DSP
+timestretch = "0.4"
+rustfft = "6.2"
+spectrum-analyzer = "1.7"
+dasp = "0.11"
+crossbeam = "0.8"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
+
 [profile.release]
 opt-level = 3

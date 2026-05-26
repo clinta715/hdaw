@@ -101,6 +101,17 @@ impl Biquad {
         self.a1 = 0.0;
         self.a2 = 0.0;
     }
+
+    fn magnitude_at(&self, freq: f32, sample_rate: u32) -> f32 {
+        let w = 2.0 * PI * freq / sample_rate as f32;
+        let num_re = self.b0 + self.b1 * w.cos() + self.b2 * (2.0 * w).cos();
+        let num_im = self.b1 * (-w.sin()) + self.b2 * (-(2.0 * w).sin());
+        let den_re = 1.0 + self.a1 * w.cos() + self.a2 * (2.0 * w).cos();
+        let den_im = self.a1 * (-w.sin()) + self.a2 * (-(2.0 * w).sin());
+        let num_mag = (num_re * num_re + num_im * num_im).sqrt();
+        let den_mag = (den_re * den_re + den_im * den_im).sqrt();
+        if den_mag < 1e-10 { 1.0 } else { num_mag / den_mag }
+    }
 }
 
 pub struct Equalizer {
@@ -216,4 +227,73 @@ impl Effect for Equalizer {
     fn set_bypassed(&mut self, bypassed: bool) {
         self.bypassed = bypassed;
     }
+}
+
+pub fn compute_eq_response(
+    low_freq: f32, low_gain: f32,
+    mid_freq: f32, mid_gain: f32, mid_q: f32,
+    high_freq: f32, high_gain: f32,
+    sample_rate: u32,
+    num_points: usize,
+) -> Vec<f32> {
+    let mut low = Biquad::new();
+    let mut mid = Biquad::new();
+    let mut high = Biquad::new();
+
+    if low_gain.abs() < 0.01 { low.set_allpass(); } else { low.set_low_shelf(low_freq, low_gain, sample_rate); }
+    if mid_gain.abs() < 0.01 { mid.set_allpass(); } else { mid.set_peaking(mid_freq, mid_gain, mid_q, sample_rate); }
+    if high_gain.abs() < 0.01 { high.set_allpass(); } else { high.set_high_shelf(high_freq, high_gain, sample_rate); }
+
+    let log_min = (20.0f32).ln();
+    let log_max = (20000.0f32).ln();
+    let mut response = Vec::with_capacity(num_points);
+    for i in 0..num_points {
+        let t = i as f32 / (num_points - 1) as f32;
+        let freq = (log_min + t * (log_max - log_min)).exp();
+        let mag_low = low.magnitude_at(freq, sample_rate);
+        let mag_mid = mid.magnitude_at(freq, sample_rate);
+        let mag_high = high.magnitude_at(freq, sample_rate);
+        let total_mag = mag_low * mag_mid * mag_high;
+        let db = 20.0 * total_mag.max(1e-10).log10();
+        response.push(db);
+    }
+    response
+}
+
+pub fn render_eq_curve_image(response: &[f32], width: u32, height: u32) -> slint::Image {
+    let w = width as usize;
+    let h = height as usize;
+    let mut pixels = vec![0u8; w * h * 4];
+    let db_min = -12.0f32;
+    let db_max = 12.0f32;
+    let half_h = h as f32 * 0.5;
+    let n = response.len();
+
+    for i in 0..w {
+        let idx = if n > 1 { (i as f32 / (w - 1) as f32) * (n - 1) as f32 } else { 0.0 };
+        let idx0 = idx.floor() as usize;
+        let idx1 = (idx0 + 1).min(n - 1);
+        let frac = idx - idx0 as f32;
+        let db = response[idx0] * (1.0 - frac) + response[idx1] * frac;
+        let db_clamped = db.clamp(db_min, db_max);
+        let y_frac = (db_clamped - db_min) / (db_max - db_min);
+        let y = (half_h - (y_frac - 0.5) * h as f32) as i32;
+
+        for row in 0..h {
+            let pi = (row * w + i) * 4;
+            let dy = (row as i32 - y).abs();
+            if dy <= 1 {
+                pixels[pi] = 100;
+                pixels[pi + 1] = 200;
+                pixels[pi + 2] = 255;
+                pixels[pi + 3] = 255;
+            } else {
+                pixels[pi + 3] = 0;
+            }
+        }
+    }
+
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
+    buf.make_mut_bytes().copy_from_slice(&pixels);
+    slint::Image::from_rgba8_premultiplied(buf)
 }

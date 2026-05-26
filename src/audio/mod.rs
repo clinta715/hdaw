@@ -4,5 +4,6 @@ pub mod engine;
 pub mod loader;
 pub mod mixer;
 pub mod playback;
+pub mod pool;
 pub mod record;
 pub mod transport;

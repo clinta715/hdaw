@@ -1,11 +1,17 @@
 use crate::project::undo::UndoStack;
 use crate::project::Project;
+use crate::project::automation::AutomationLane;
 use crate::ui::main_window::{ClipInfo, MainWindow, TrackInfo, BusInfo, SendInfo, EffectSlotInfo, RulerTick};
 use crate::utils::waveform::{WaveformPeaks, render_waveform_image};
 use slint::{Model, ModelRc, VecModel};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+
+pub const TRACK_HEIGHT: f32 = 90.0;
+pub const CLIP_HEIGHT: f32 = 52.0;
+pub const LANE_HEIGHT: f32 = 26.0;
+pub const CLIP_Y_OFFSET: f32 = 4.0;
 
 pub fn clip_at_position(
     clips: &impl Model<Data = ClipInfo>,
@@ -15,9 +21,9 @@ pub fn clip_at_position(
     for i in 0..clips.row_count() {
         let clip = clips.row_data(i)?;
         let clip_x = clip.x;
-        let clip_y = clip.track_index as f32 * 60.0 + 4.0;
+        let clip_y = clip.track_index as f32 * TRACK_HEIGHT + CLIP_Y_OFFSET;
         let clip_w = clip.width.max(4.0);
-        let clip_h = 52.0;
+        let clip_h = CLIP_HEIGHT;
         if x >= clip_x && x <= clip_x + clip_w && y >= clip_y && y <= clip_y + clip_h {
             return Some((i, clip));
         }
@@ -36,7 +42,7 @@ pub fn is_on_right_edge(local_x: f32, clip_w: f32) -> bool {
 pub fn compute_cursor_type(clips: &impl Model<Data = ClipInfo>, x: f32, y: f32, alt: bool) -> i32 {
     if let Some((_i, clip)) = clip_at_position(clips, x, y) {
         let local_x = x - clip.x;
-        let local_y = y - (clip.track_index as f32 * 60.0 + 4.0);
+        let local_y = y - (clip.track_index as f32 * TRACK_HEIGHT + CLIP_Y_OFFSET);
 
         if local_y <= 20.0 {
             if local_x <= 10.0 || local_x >= clip.width - 10.0 {
@@ -71,15 +77,9 @@ pub fn samples_to_pixels(samples: u64, pixels_per_second: f32, sample_rate: u32)
     (samples as f32 / sample_rate as f32) * pixels_per_second
 }
 
-pub fn compute_ruler_ticks(
-    pixels_per_second: f32,
-    scroll_x: f32,
-    visible_width: f32,
-) -> Vec<RulerTick> {
-    let pps = pixels_per_second.max(1.0) as f64;
-    let start_px = scroll_x as f64;
-    let end_px = ((scroll_x + visible_width).max(start_px as f32)) as f64;
+enum RulerDetail { BarsOnly, Medium, Close }
 
+fn compute_time_ticks(pps: f64, start_px: f64, end_px: f64) -> Vec<RulerTick> {
     let target_px = 100.0;
     let raw_interval = target_px / pps;
     let nice = [0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0];
@@ -114,6 +114,242 @@ pub fn compute_ruler_ticks(
     ticks
 }
 
+fn compute_bar_beat_ticks(
+    pps: f64,
+    start_px: f64,
+    end_px: f64,
+    bpm: f64,
+    time_sig_numerator: u8,
+    detail: RulerDetail,
+) -> Vec<RulerTick> {
+    let beats_per_second = bpm / 60.0;
+    let beats_per_bar = time_sig_numerator as u64;
+
+    let start_secs = start_px / pps;
+    let end_secs = end_px / pps;
+    let start_beat = (start_secs * beats_per_second).floor() as u64;
+    let end_beat = (end_secs * beats_per_second).ceil() as u64 + 1;
+
+    let mut ticks = Vec::new();
+    for beat in start_beat..=end_beat {
+        let beat_secs = beat as f64 / beats_per_second;
+        let px = beat_secs * pps;
+        let is_bar = beat % beats_per_bar == 0;
+
+        match detail {
+            RulerDetail::BarsOnly => {
+                if !is_bar {
+                    continue;
+                }
+                let bar_num = beat / beats_per_bar + 1;
+                ticks.push(RulerTick {
+                    position: px as f32,
+                    label: format!("{:03}:01", bar_num).into(),
+                    is_major: true,
+                });
+            }
+            RulerDetail::Medium => {
+                let label = if is_bar {
+                    let bar_num = beat / beats_per_bar + 1;
+                    format!("{:03}:01", bar_num)
+                } else {
+                    String::new()
+                };
+                ticks.push(RulerTick {
+                    position: px as f32,
+                    label: label.into(),
+                    is_major: is_bar,
+                });
+            }
+            RulerDetail::Close => {
+                let bar_num = beat / beats_per_bar + 1;
+                let beat_num = beat % beats_per_bar + 1;
+                ticks.push(RulerTick {
+                    position: px as f32,
+                    label: format!("{:03}:{:02}", bar_num, beat_num).into(),
+                    is_major: is_bar,
+                });
+            }
+        }
+    }
+    ticks
+}
+
+fn compute_frame_ticks(
+    pps: f64,
+    start_px: f64,
+    end_px: f64,
+    snap_param: i32,
+) -> Vec<RulerTick> {
+    let fps: f64 = match snap_param {
+        0 => 24.0,
+        1 => 25.0,
+        2 => 30.0,
+        3 => 30.0,
+        4 => 60.0,
+        _ => 30.0,
+    };
+
+    let start_secs = start_px / pps;
+    let end_secs = end_px / pps;
+    let start_frame = (start_secs * fps).floor() as u64;
+    let end_frame = (end_secs * fps).ceil() as u64 + 1;
+
+    let mut ticks = Vec::new();
+    for frame in start_frame..=end_frame {
+        let frame_secs = frame as f64 / fps;
+        let px = frame_secs * pps;
+        let is_second = (frame as f64 % fps) < 0.001;
+        let label = if is_second {
+            let total_secs = frame_secs as u64;
+            format!("{:02}:{:02}", total_secs / 60, total_secs % 60)
+        } else {
+            String::new()
+        };
+        ticks.push(RulerTick {
+            position: px as f32,
+            label: label.into(),
+            is_major: is_second,
+        });
+    }
+    ticks
+}
+
+pub const DISTANT_PPB: f64 = 25.0;
+pub const MEDIUM_PPB: f64 = 80.0;
+
+pub fn compute_ruler_ticks(
+    pixels_per_second: f32,
+    scroll_x: f32,
+    visible_width: f32,
+    bpm: f64,
+    time_sig_numerator: u8,
+    _time_sig_denominator: u8,
+    snap_enabled: bool,
+    snap_mode: i32,
+    snap_param: i32,
+    _sample_rate: u32,
+) -> Vec<RulerTick> {
+    let pps = pixels_per_second.max(1.0) as f64;
+    let start_px = scroll_x as f64;
+    let end_px = ((scroll_x + visible_width).max(start_px as f32)) as f64;
+    let pixels_per_beat = pps * 60.0 / bpm;
+
+    if !snap_enabled {
+        return compute_time_ticks(pps, start_px, end_px);
+    }
+
+    match snap_mode {
+        2 /* Time */ => compute_time_ticks(pps, start_px, end_px),
+        0 /* Adaptive */ => {
+            if pixels_per_beat < DISTANT_PPB {
+                compute_time_ticks(pps, start_px, end_px)
+            } else if pixels_per_beat < MEDIUM_PPB {
+                compute_bar_beat_ticks(pps, start_px, end_px, bpm, time_sig_numerator, RulerDetail::Medium)
+            } else {
+                compute_bar_beat_ticks(pps, start_px, end_px, bpm, time_sig_numerator, RulerDetail::Close)
+            }
+        }
+        1 /* Beats */ => {
+            if pixels_per_beat < DISTANT_PPB {
+                compute_bar_beat_ticks(pps, start_px, end_px, bpm, time_sig_numerator, RulerDetail::BarsOnly)
+            } else if pixels_per_beat < MEDIUM_PPB {
+                compute_bar_beat_ticks(pps, start_px, end_px, bpm, time_sig_numerator, RulerDetail::Medium)
+            } else {
+                compute_bar_beat_ticks(pps, start_px, end_px, bpm, time_sig_numerator, RulerDetail::Close)
+            }
+        }
+        3 /* Frames */ => {
+            if pixels_per_beat < DISTANT_PPB {
+                compute_time_ticks(pps, start_px, end_px)
+            } else {
+                compute_frame_ticks(pps, start_px, end_px, snap_param)
+            }
+        }
+        _ => compute_time_ticks(pps, start_px, end_px),
+    }
+}
+
+pub fn hit_test_automation_point(
+    lane: &AutomationLane,
+    time: f64,
+    _value: f32,
+    tolerance: f64,
+) -> Option<usize> {
+    if !lane.enabled || lane.points.is_empty() {
+        return None;
+    }
+    for (i, p) in lane.points.iter().enumerate() {
+        if (p.time - time).abs() <= tolerance {
+            return Some(i);
+        }
+    }
+    None
+}
+
+pub fn render_automation_image(
+    lanes: &[&AutomationLane],
+    start_time: f64,
+    end_time: f64,
+    width: u32,
+    height: u32,
+) -> slint::Image {
+    let w = width.max(1) as usize;
+    let h = height.max(1) as usize;
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(w as u32, h as u32);
+    let bytes = buf.make_mut_bytes();
+    for pixel in bytes.chunks_exact_mut(4) {
+        pixel[0] = 0;
+        pixel[1] = 0;
+        pixel[2] = 0;
+        pixel[3] = 8;
+    }
+
+    for lane in lanes {
+        if !lane.enabled || lane.points.len() < 2 {
+            continue;
+        }
+        let (r, g, b) = lane.color;
+        let range = end_time - start_time;
+        if range <= 0.0 {
+            continue;
+        }
+
+        for i in 0..lane.points.len() - 1 {
+            let p1 = &lane.points[i];
+            let p2 = &lane.points[i + 1];
+            if p2.time < start_time || p1.time > end_time {
+                continue;
+            }
+            let t1 = p1.time;
+            let t2 = p2.time;
+            let v1 = p1.value.clamp(0.0, 1.0);
+            let v2 = p2.value.clamp(0.0, 1.0);
+
+            let col_start = ((t1 - start_time) / range * (w as f64)).floor() as isize;
+            let col_end = ((t2 - start_time) / range * (w as f64)).ceil() as isize;
+
+            for col in col_start.max(0)..=col_end.min(w as isize - 1) {
+                let frac = if t2 == t1 { 0.0 } else {
+                    let col_time = start_time + col as f64 * range / w as f64;
+                    ((col_time - t1) / (t2 - t1)).clamp(0.0, 1.0)
+                };
+                let val = v1 + (v2 - v1) * frac as f32;
+                let row = ((1.0 - val) * (h - 1) as f32).round() as usize;
+                let idx = row * w + col as usize;
+                if let Some(pixel) = bytes.get_mut(idx * 4..idx * 4 + 4) {
+                    let alpha = pixel[3].saturating_add(192);
+                    pixel[0] = r;
+                    pixel[1] = g;
+                    pixel[2] = b;
+                    pixel[3] = alpha;
+                }
+            }
+        }
+    }
+    slint::Image::from_rgba8_premultiplied(buf)
+}
+
 pub fn sync_selection(window: &MainWindow, selected_ids: &HashSet<Uuid>) {
     let clips = window.get_clips();
     let new_clips: Vec<ClipInfo> = (0..clips.row_count())
@@ -144,6 +380,7 @@ pub fn sync_project_to_timeline_with_waveforms(
 ) {
     let sample_rate = project.sample_rate;
     let px_per_sec = window.get_pixels_per_second() as f64;
+
     let clip_infos: Vec<ClipInfo> = project
         .tracks
         .iter()
@@ -167,6 +404,23 @@ pub fn sync_project_to_timeline_with_waveforms(
                     slint::Image::from_rgba8_premultiplied(buf)
                 });
 
+                let auto_image = if let Some(ref param_name) = track.selected_automation_param {
+                    if let Some(lane) = track.automation.get(param_name) {
+                        let start_sec = clip.position as f64 / sample_rate as f64;
+                        let end_sec = (clip.position + clip.length) as f64 / sample_rate as f64;
+                        let img_w = (w_px as u32).max(4).min(2000);
+                        render_automation_image(&[lane], start_sec, end_sec, img_w, 26)
+                    } else {
+                        let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(1, 26);
+                        buf.make_mut_bytes().fill(0);
+                        slint::Image::from_rgba8_premultiplied(buf)
+                    }
+                } else {
+                    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(1, 26);
+                    buf.make_mut_bytes().fill(0);
+                    slint::Image::from_rgba8_premultiplied(buf)
+                };
+
                 ClipInfo {
                     id: clip.id.to_string().into(),
                     track_index: track_idx as i32,
@@ -180,6 +434,8 @@ pub fn sync_project_to_timeline_with_waveforms(
                     selected: false,
                     track_id: track.id.to_string().into(),
                     waveform: waveform_img,
+                    auto_image,
+                    auto_param_name: track.selected_automation_param.clone().unwrap_or_default().into(),
                 }
             })
         })
@@ -203,8 +459,6 @@ pub fn sync_project_to_timeline_with_waveforms(
                 }
             }).collect();
 
-            let is_sel = selected_id == track.id.to_string().as_str();
-
             let fx_slots: Vec<EffectSlotInfo> = track.effects_chain.iter().enumerate().map(|(idx, e)| {
                 let short_name = match e.effect_type.as_str() {
                     "Equalizer" => "EQ",
@@ -222,6 +476,14 @@ pub fn sync_project_to_timeline_with_waveforms(
                 }
             }).collect();
 
+            let is_sel = selected_id == track.id.to_string().as_str();
+
+            let output_name = match track.output_id {
+                Some(oid) => project.buses.iter().find(|b| b.id == oid)
+                    .map(|b| b.name.as_str()).unwrap_or("???"),
+                None => "Mstr",
+            };
+
             TrackInfo {
                 id: track.id.to_string().into(),
                 index: i as i32,
@@ -231,9 +493,15 @@ pub fn sync_project_to_timeline_with_waveforms(
                 mute: track.mute,
                 solo: track.solo,
                 armed: track.armed,
+                input_monitoring: track.input_monitoring,
                 selected: is_sel,
+                track_color: slint::Color::from_rgb_u8(track.color.0, track.color.1, track.color.2).into(),
                 sends: ModelRc::new(VecModel::from(pb_sends)),
                 effects: ModelRc::new(VecModel::from(fx_slots)),
+                peak_l: 0.0,
+                peak_r: 0.0,
+                output_name: output_name.into(),
+                auto_param_name: track.selected_automation_param.clone().unwrap_or_default().into(),
             }
         })
         .collect();
@@ -271,6 +539,12 @@ pub fn sync_project_to_timeline_with_waveforms(
                 }
             }).collect();
 
+            let bus_output_name = match bus.output_id {
+                Some(oid) => project.buses.iter().find(|b| b.id == oid)
+                    .map(|b| b.name.as_str()).unwrap_or("???"),
+                None => "Mstr",
+            };
+
             BusInfo {
                 id: bus.id.to_string().into(),
                 index: i as i32,
@@ -280,8 +554,12 @@ pub fn sync_project_to_timeline_with_waveforms(
                 mute: bus.mute,
                 solo: bus.solo,
                 selected: selected_bus == bus.id.to_string().as_str(),
+                track_color: slint::Color::from_rgb_u8(bus.color.0, bus.color.1, bus.color.2).into(),
                 sends: ModelRc::new(VecModel::from(pb_sends)),
                 effects: ModelRc::new(VecModel::from(fx_slots)),
+                peak_l: 0.0,
+                peak_r: 0.0,
+                output_name: bus_output_name.into(),
             }
         })
         .collect();

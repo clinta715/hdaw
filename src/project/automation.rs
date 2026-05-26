@@ -7,6 +7,7 @@ pub struct AutomationLane {
     pub enabled: bool,
     pub read_enabled: bool,
     pub write_enabled: bool,
+    pub color: (u8, u8, u8),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +40,7 @@ impl AutomationLane {
             enabled: true,
             read_enabled: true,
             write_enabled: false,
+            color: (200, 200, 60),
         }
     }
 

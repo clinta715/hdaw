@@ -1,3 +1,4 @@
+use crate::project::automation::AutomationPoint;
 use crate::project::bus::Bus;
 use crate::project::clip::AudioClip;
 use crate::project::track::{EffectInstance, Track};
@@ -75,6 +76,35 @@ pub enum EditCommand {
         old_val: f32,
         new_val: f32,
     },
+    ChangeMasterVolume {
+        old_val: f32,
+        new_val: f32,
+    },
+    ChangeMasterPan {
+        old_val: f32,
+        new_val: f32,
+    },
+    ToggleMasterMute,
+    ChangeTrackOutput {
+        track_id: Uuid,
+        old_output: Option<Uuid>,
+        new_output: Option<Uuid>,
+    },
+    ChangeBusOutput {
+        bus_id: Uuid,
+        old_output: Option<Uuid>,
+        new_output: Option<Uuid>,
+    },
+    AddSend {
+        source_id: Uuid,
+        is_track: bool,
+        send: crate::project::track::AuxSend,
+    },
+    RemoveSend {
+        source_id: Uuid,
+        is_track: bool,
+        send: crate::project::track::AuxSend,
+    },
     SetFade {
         track_id: Uuid,
         clip_id: Uuid,
@@ -141,6 +171,24 @@ pub enum EditCommand {
         target_id: Uuid,
         is_track: bool,
         effect_index: usize,
+    },
+    AddAutomationPoint {
+        track_id: Uuid,
+        parameter_name: String,
+        point: AutomationPoint,
+    },
+    RemoveAutomationPoint {
+        track_id: Uuid,
+        parameter_name: String,
+        point: AutomationPoint,
+        index: usize,
+    },
+    MoveAutomationPoint {
+        track_id: Uuid,
+        parameter_name: String,
+        old_point: AutomationPoint,
+        new_point: AutomationPoint,
+        index: usize,
     },
 }
 
@@ -317,6 +365,43 @@ pub fn execute_command(project: &mut Project, cmd: &EditCommand) {
                 bus.pan = *new_val;
             }
         }
+        EditCommand::ChangeMasterVolume { new_val, .. } => { project.master_volume = *new_val; }
+        EditCommand::ChangeMasterPan { new_val, .. } => { project.master_pan = *new_val; }
+        EditCommand::ToggleMasterMute => { project.master_mute = !project.master_mute; }
+        EditCommand::ChangeTrackOutput { track_id, new_output, .. } => {
+            if let Some(track) = find_track_mut(project, *track_id) { track.output_id = *new_output; }
+        }
+        EditCommand::ChangeBusOutput { bus_id, new_output, .. } => {
+            if let Some(bus) = find_bus_mut(project, *bus_id) { bus.output_id = *new_output; }
+        }
+        EditCommand::AddSend { source_id, is_track, send } => {
+            if *is_track { if let Some(track) = find_track_mut(project, *source_id) { track.sends.push(send.clone()); } }
+            else { if let Some(bus) = find_bus_mut(project, *source_id) { bus.sends.push(send.clone()); } }
+        }
+        EditCommand::RemoveSend { source_id, is_track, send } => {
+            if *is_track { if let Some(track) = find_track_mut(project, *source_id) { track.sends.retain(|s| s.id != send.id); } }
+            else { if let Some(bus) = find_bus_mut(project, *source_id) { bus.sends.retain(|s| s.id != send.id); } }
+        }
+        EditCommand::AddAutomationPoint { track_id, parameter_name, point } => {
+            if let Some(track) = find_track_mut(project, *track_id) {
+                let lane = track.automation.entry(parameter_name.clone()).or_insert_with(|| crate::project::automation::AutomationLane::new(parameter_name.clone()));
+                lane.add_point(point.time, point.value);
+            }
+        }
+        EditCommand::RemoveAutomationPoint { track_id, parameter_name, index, .. } => {
+            if let Some(track) = find_track_mut(project, *track_id) {
+                if let Some(lane) = track.automation.get_mut(parameter_name.as_str()) {
+                    if *index < lane.points.len() { lane.points.remove(*index); }
+                }
+            }
+        }
+        EditCommand::MoveAutomationPoint { track_id, parameter_name, new_point, index, .. } => {
+            if let Some(track) = find_track_mut(project, *track_id) {
+                if let Some(lane) = track.automation.get_mut(parameter_name.as_str()) {
+                    if *index < lane.points.len() { lane.points[*index] = new_point.clone(); }
+                }
+            }
+        }
     }
 }
 
@@ -454,6 +539,44 @@ pub fn undo_command(project: &mut Project, cmd: &EditCommand) {
         EditCommand::ChangeBusPan { bus_id, old_val, .. } => {
             if let Some(bus) = find_bus_mut(project, *bus_id) {
                 bus.pan = *old_val;
+            }
+        }
+        EditCommand::ChangeMasterVolume { old_val, .. } => { project.master_volume = *old_val; }
+        EditCommand::ChangeMasterPan { old_val, .. } => { project.master_pan = *old_val; }
+        EditCommand::ToggleMasterMute => { project.master_mute = !project.master_mute; }
+        EditCommand::ChangeTrackOutput { track_id, old_output, .. } => {
+            if let Some(track) = find_track_mut(project, *track_id) { track.output_id = *old_output; }
+        }
+        EditCommand::ChangeBusOutput { bus_id, old_output, .. } => {
+            if let Some(bus) = find_bus_mut(project, *bus_id) { bus.output_id = *old_output; }
+        }
+        EditCommand::AddSend { source_id, is_track, send } => {
+            if *is_track { if let Some(track) = find_track_mut(project, *source_id) { track.sends.retain(|s| s.id != send.id); } }
+            else { if let Some(bus) = find_bus_mut(project, *source_id) { bus.sends.retain(|s| s.id != send.id); } }
+        }
+        EditCommand::RemoveSend { source_id, is_track, send } => {
+            if *is_track { if let Some(track) = find_track_mut(project, *source_id) { track.sends.push(send.clone()); } }
+            else { if let Some(bus) = find_bus_mut(project, *source_id) { bus.sends.push(send.clone()); } }
+        }
+        EditCommand::AddAutomationPoint { track_id, parameter_name, point } => {
+            if let Some(track) = find_track_mut(project, *track_id) {
+                if let Some(lane) = track.automation.get_mut(parameter_name.as_str()) {
+                    lane.points.retain(|p| (p.time - point.time).abs() > 0.000001);
+                }
+            }
+        }
+        EditCommand::RemoveAutomationPoint { track_id, parameter_name, point, index } => {
+            if let Some(track) = find_track_mut(project, *track_id) {
+                let lane = track.automation.entry(parameter_name.clone()).or_insert_with(|| crate::project::automation::AutomationLane::new(parameter_name.clone()));
+                let idx = (*index).min(lane.points.len());
+                lane.points.insert(idx, point.clone());
+            }
+        }
+        EditCommand::MoveAutomationPoint { track_id, parameter_name, old_point, index, .. } => {
+            if let Some(track) = find_track_mut(project, *track_id) {
+                if let Some(lane) = track.automation.get_mut(parameter_name.as_str()) {
+                    if *index < lane.points.len() { lane.points[*index] = old_point.clone(); }
+                }
             }
         }
     }

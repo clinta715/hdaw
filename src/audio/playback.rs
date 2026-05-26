@@ -6,6 +6,7 @@ use crate::audio::record::RecordState;
 use crate::project::clip::{PitchShiftParams, TimeStretchParams};
 use crate::project::track::{EffectInstance, Track};
 use crate::project::bus::Bus;
+use crate::project::automation::AutomationLane;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -75,6 +76,14 @@ pub struct PlaybackState {
     scratch_buses: HashMap<Uuid, Vec<f32>>,
     track_effects: HashMap<Uuid, Vec<Box<dyn Effect>>>,
     bus_effects: HashMap<Uuid, Vec<Box<dyn Effect>>>,
+    pub track_peaks: HashMap<Uuid, (f32, f32)>,
+    pub bus_peaks: HashMap<Uuid, (f32, f32)>,
+    pub master_peak: (f32, f32),
+    pub master_volume: f32,
+    pub master_pan: f32,
+    pub master_mute: bool,
+    pub track_automation: HashMap<Uuid, HashMap<String, AutomationLane>>,
+    pub bus_automation: HashMap<Uuid, HashMap<String, AutomationLane>>,
 }
 
 impl PlaybackState {
@@ -96,6 +105,14 @@ impl PlaybackState {
             scratch_buses: HashMap::new(),
             track_effects: HashMap::new(),
             bus_effects: HashMap::new(),
+            track_peaks: HashMap::new(),
+            bus_peaks: HashMap::new(),
+            master_peak: (0.0, 0.0),
+            master_volume: 1.0,
+            master_pan: 0.0,
+            master_mute: false,
+            track_automation: HashMap::new(),
+            bus_automation: HashMap::new(),
         }
     }
 
@@ -216,6 +233,38 @@ impl PlaybackManager {
         self.state.lock().map(|s| s.position).unwrap_or(0)
     }
 
+    pub fn get_track_peaks(&self) -> HashMap<Uuid, (f32, f32)> {
+        self.state.lock().map(|s| s.track_peaks.clone()).unwrap_or_default()
+    }
+
+    pub fn get_bus_peaks(&self) -> HashMap<Uuid, (f32, f32)> {
+        self.state.lock().map(|s| s.bus_peaks.clone()).unwrap_or_default()
+    }
+
+    pub fn get_master_peak(&self) -> (f32, f32) {
+        self.state.lock().map(|s| s.master_peak).unwrap_or((0.0, 0.0))
+    }
+
+    pub fn update_master_params(&self, volume: f32, pan: f32, mute: bool) {
+        if let Ok(mut s) = self.state.lock() {
+            s.master_volume = volume;
+            s.master_pan = pan;
+            s.master_mute = mute;
+        }
+    }
+
+    pub fn get_compressor_gr(&self, target_id: Uuid, is_track: bool, effect_index: usize) -> f32 {
+        if let Ok(s) = self.state.lock() {
+            let chain = if is_track { s.track_effects.get(&target_id) } else { s.bus_effects.get(&target_id) };
+            if let Some(chain) = chain {
+                if let Some(effect) = chain.get(effect_index) {
+                    return effect.get_gain_reduction();
+                }
+            }
+        }
+        0.0
+    }
+
     pub fn set_loop(&self, enabled: bool, start: u64, end: u64) {
         if let Ok(mut s) = self.state.lock() {
             s.loop_enabled = enabled;
@@ -317,6 +366,8 @@ impl PlaybackManager {
         let mut buffers: HashMap<String, AudioBuffer> = HashMap::new();
         let mut track_fx: HashMap<Uuid, Vec<Box<dyn Effect>>> = HashMap::new();
         let mut bus_fx: HashMap<Uuid, Vec<Box<dyn Effect>>> = HashMap::new();
+        let mut track_auto: HashMap<Uuid, HashMap<String, AutomationLane>> = HashMap::new();
+        let mut bus_auto: HashMap<Uuid, HashMap<String, AutomationLane>> = HashMap::new();
 
         for bus in buses {
             let pb_sends: Vec<PlaybackSend> = bus.sends.iter().map(|s| PlaybackSend {
@@ -338,6 +389,8 @@ impl PlaybackManager {
                 output_id: bus.output_id,
                 sends: pb_sends,
             });
+
+            bus_auto.insert(bus.id, bus.automation.clone());
         }
 
         let sorted_buses = Self::sort_buses_topologically(&pb_buses);
@@ -363,6 +416,8 @@ impl PlaybackManager {
                 output_id: track.output_id,
                 sends: pb_sends,
             });
+
+            track_auto.insert(track.id, track.automation.clone());
 
             for clip in &track.clips {
                 let path_str = clip.source_path.clone();
@@ -412,6 +467,8 @@ impl PlaybackManager {
             s.project_sample_rate = project_sample_rate;
             s.track_effects = track_fx;
             s.bus_effects = bus_fx;
+            s.track_automation = track_auto;
+            s.bus_automation = bus_auto;
         }
     }
 
@@ -649,6 +706,18 @@ impl PlaybackManager {
                     let samples = std::mem::take(track_buf);
                     let mut audio_buf = AudioBuffer::from_samples(samples, 2, project_sr);
                     for effect in fx_chain.iter_mut() {
+                        if let Some(lanes) = state.track_automation.get(&track.id) {
+                            let t = current_pos as f64 / project_sr as f64;
+                            for (param_name, lane) in lanes {
+                                if lane.enabled && lane.read_enabled && lane.points.len() >= 2 {
+                                    if effect.get_parameter(param_name).is_some() {
+                                        if let Some(v) = lane.get_value_at(t) {
+                                            effect.set_parameter(param_name, v);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         effect.process(&mut audio_buf);
                     }
                     *track_buf = audio_buf.samples;
@@ -659,6 +728,21 @@ impl PlaybackManager {
         for track in &tracks {
             if track.mute { continue; }
             if any_track_soloed && !track.solo { continue; }
+
+            let mut track = track.clone();
+            if let Some(lanes) = state.track_automation.get(&track.id) {
+                let t = current_pos as f64 / project_sr as f64;
+                if let Some(lane) = lanes.get("volume") {
+                    if lane.enabled && lane.read_enabled {
+                        if let Some(v) = lane.get_value_at(t) { track.volume = v; }
+                    }
+                }
+                if let Some(lane) = lanes.get("pan") {
+                    if lane.enabled && lane.read_enabled {
+                        if let Some(v) = lane.get_value_at(t) { track.pan = v; }
+                    }
+                }
+            }
 
             let track_buf = match scratch_tracks.get(&track.id) {
                 Some(b) => b,
@@ -707,6 +791,18 @@ impl PlaybackManager {
                     let samples = std::mem::take(bus_buf);
                     let mut audio_buf = AudioBuffer::from_samples(samples, 2, project_sr);
                     for effect in fx_chain.iter_mut() {
+                        if let Some(lanes) = state.bus_automation.get(&bus.id) {
+                            let t = current_pos as f64 / project_sr as f64;
+                            for (param_name, lane) in lanes {
+                                if lane.enabled && lane.read_enabled && lane.points.len() >= 2 {
+                                    if effect.get_parameter(param_name).is_some() {
+                                        if let Some(v) = lane.get_value_at(t) {
+                                            effect.set_parameter(param_name, v);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         effect.process(&mut audio_buf);
                     }
                     *bus_buf = audio_buf.samples;
@@ -717,6 +813,21 @@ impl PlaybackManager {
         for bus in &buses {
             if bus.mute { continue; }
             if any_bus_soloed && !bus.solo { continue; }
+
+            let mut bus = bus.clone();
+            if let Some(lanes) = state.bus_automation.get(&bus.id) {
+                let t = current_pos as f64 / project_sr as f64;
+                if let Some(lane) = lanes.get("volume") {
+                    if lane.enabled && lane.read_enabled {
+                        if let Some(v) = lane.get_value_at(t) { bus.volume = v; }
+                    }
+                }
+                if let Some(lane) = lanes.get("pan") {
+                    if lane.enabled && lane.read_enabled {
+                        if let Some(v) = lane.get_value_at(t) { bus.pan = v; }
+                    }
+                }
+            }
 
             let bus_buf = match scratch_buses.get(&bus.id) {
                 Some(b) => b,
@@ -759,6 +870,72 @@ impl PlaybackManager {
 
         for i in 0..output.len() {
             output[i] = scratch_master.get(i).copied().unwrap_or(0.0).clamp(-1.0, 1.0);
+        }
+
+        if state.master_mute {
+            for s in output.iter_mut() { *s = 0.0; }
+        } else {
+            let mv = state.master_volume;
+            let mp = state.master_pan;
+            for frame in 0..num_frames_out {
+                let idx = frame * num_channels_out;
+                if idx + 1 < output.len() {
+                    let l_gain = mv * (1.0 - mp).max(0.0).sqrt();
+                    let r_gain = mv * (1.0 + mp).max(0.0).sqrt();
+                    output[idx] *= l_gain;
+                    output[idx + 1] *= r_gain;
+                }
+            }
+        }
+
+        let fall = 0.92f32;
+        let num_frames = num_frames_out as usize;
+        for track in &tracks {
+            let prev = state.track_peaks.get(&track.id).copied().unwrap_or((0.0, 0.0));
+            if let Some(buf) = scratch_tracks.get(&track.id) {
+                let mut peak_l = 0.0f32;
+                let mut peak_r = 0.0f32;
+                for frame in 0..num_frames {
+                    let idx = frame * num_channels_out;
+                    if idx + 1 < buf.len() {
+                        peak_l = peak_l.max(buf[idx].abs());
+                        peak_r = peak_r.max(buf[idx + 1].abs());
+                    }
+                }
+                state.track_peaks.insert(track.id, (if peak_l > prev.0 { peak_l } else { prev.0 * fall }, if peak_r > prev.1 { peak_r } else { prev.1 * fall }));
+            } else {
+                state.track_peaks.insert(track.id, (prev.0 * fall, prev.1 * fall));
+            }
+        }
+        for bus in &buses {
+            let prev = state.bus_peaks.get(&bus.id).copied().unwrap_or((0.0, 0.0));
+            if let Some(buf) = scratch_buses.get(&bus.id) {
+                let mut peak_l = 0.0f32;
+                let mut peak_r = 0.0f32;
+                for frame in 0..num_frames {
+                    let idx = frame * num_channels_out;
+                    if idx + 1 < buf.len() {
+                        peak_l = peak_l.max(buf[idx].abs());
+                        peak_r = peak_r.max(buf[idx + 1].abs());
+                    }
+                }
+                state.bus_peaks.insert(bus.id, (if peak_l > prev.0 { peak_l } else { prev.0 * fall }, if peak_r > prev.1 { peak_r } else { prev.1 * fall }));
+            } else {
+                state.bus_peaks.insert(bus.id, (prev.0 * fall, prev.1 * fall));
+            }
+        }
+        {
+            let mut peak_l = 0.0f32;
+            let mut peak_r = 0.0f32;
+            for frame in 0..num_frames {
+                let idx = frame * num_channels_out;
+                if idx + 1 < output.len() {
+                    peak_l = peak_l.max(output[idx].abs());
+                    peak_r = peak_r.max(output[idx + 1].abs());
+                }
+            }
+            let prev = state.master_peak;
+            state.master_peak = (if peak_l > prev.0 { peak_l } else { prev.0 * fall }, if peak_r > prev.1 { peak_r } else { prev.1 * fall });
         }
 
         state.scratch_master = scratch_master;
