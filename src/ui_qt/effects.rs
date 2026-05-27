@@ -121,8 +121,8 @@ impl effect_bridge::EffectEditor {
                             "params": params,
                             "chain": chain_json,
                         });
-                        self.as_mut().set_effect_json(json.to_string());
-                        return;
+                    self.as_mut().set_effect_json(json.to_string());
+                    return;
                     }
                 }
             }

@@ -27,7 +27,7 @@ fn main() {
 
         std::env::set_var("QT_QUICK_CONTROLS_STYLE", "Basic");
 
-        std::thread::spawn(|| {
+        let qt_handle = std::thread::spawn(|| {
             use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QUrl};
 
             let mut app = QGuiApplication::new();
@@ -41,7 +41,10 @@ fn main() {
         });
 
         info!("Qt main window launched on separate thread");
+        qt_handle.join().ok();
+        info!("Qt thread finished, exiting");
     }
 
+    #[cfg(not(feature = "qt"))]
     app.run();
 }

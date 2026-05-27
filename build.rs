@@ -4,7 +4,14 @@ fn main() {
         use cxx_qt_build::QmlModule;
 
         cxx_qt_build::CxxQtBuilder::new_qml_module(
-            QmlModule::new("com.hdaw").qml_file("src/ui_qt/main.qml"),
+            QmlModule::new("com.hdaw")
+                .qml_file("src/ui_qt/main.qml")
+                .qml_file("src/ui_qt/MenuBar.qml")
+                .qml_file("src/ui_qt/ToolBar.qml")
+                .qml_file("src/ui_qt/PoolPanel.qml")
+                .qml_file("src/ui_qt/FXEditor.qml")
+                .qml_file("src/ui_qt/MixerPanel.qml")
+                .qml_file("src/ui_qt/TimelineArea.qml"),
         )
         .qt_module("Quick")
         .files([

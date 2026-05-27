@@ -140,9 +140,14 @@ Timer (60fps Qt): reads compressor GR via EffectEditor::sync_gr()
     - **Connections syntax (Qt 6)**: Use `function onFoo_bar() { ... }` not the deprecated `onFooBar: { ... }` form
     - **Style customization**: Windows native style rejects custom `background` on Buttons. Set `QT_QUICK_CONTROLS_STYLE=Basic` or `Fusion` before creating `QGuiApplication`
 17. **Button `background:` rejection bypass**: Even with `QT_QUICK_CONTROLS_STYLE=Basic` set in a `thread::spawn`, Windows native style may still reject custom `background:` on `Button`. The robust workaround: replace `Button { background: Rectangle {...} }` with a plain `Rectangle + MouseArea + Text` — avoids Qt Quick Controls entirely for those buttons. Form buttons without custom backgrounds (Stop, Undo, Redo, Import) work fine as `Button { flat: true }`.
-18. **CXX-Qt `String` qproperty → QML JS type mismatch**: `#[qproperty(String, name)]` exposes a `rust::cxxbridge1::String` to QML — NOT a standard JS `String`. Two consequences:
-    - **Label/color assignment fails**: `Label { text: state.time_display }` produces "Unable to assign rust::cxxbridge1::String to QString". Fix: coerce with `"" + state.time_display`.
-    - **`JSON.parse()` fails on empty strings**: The Rust default `""` may not be falsy in QML JS. `if (!jsonStr \|\| jsonStr.length === 0)` guards do NOT catch it. Fix: use `try { data = JSON.parse(jsonStr) } catch (e) { return }` — catches any non-JSON input including CXX string bridging artifacts.
+18. **CXX-Qt `String` qproperty property bindings fail at runtime**: `#[qproperty(String, name)]` generates `Q_PROPERTY(::rust::String ...)` in the C++ header. Qt's meta-object system cannot evaluate QML property bindings for `::rust::String` because it's not a registered Qt metatype for binding resolution.
+    - **Broken**: `Label { text: state.time_display }` — fails silently or shows blank
+    - **Working**: `Label { text: state.get_time_display() }` — call the qinvokable directly
+    - **Root cause**: Generated C++ header shows `Q_PROPERTY(::rust::String time_display ...)` — Qt's binding engine can't resolve this type
+    - **Fix for formatted display**: Use primitive qproperties (`i32`, `f64`) for raw data; expose formatted strings via `#[qinvokable] fn get_foo(self: &T) -> String`. QML calls the method directly.
+    - **Fix for JSON data** (pool, effects, mixer, timeline): `#[qproperty(String, json)]` still works via `Connections { function onJsonChanged() { parse(json) } }` — signal fires and passes a JS string. No `"" +` coercion needed.
+    - **`QString` is unavailable in cxx-qt 0.8 bridges**: `type QString = cxx_qt_lib::QString;` in extern blocks causes CXX ExternType::Id mismatch.
+    - **`QByteArray` available but unnecessary**: `QByteArray` from `cxx_qt_lib` works but `String` qproperties suffice for the JSON use case via signal handlers.
 
 ---
 
@@ -224,7 +229,7 @@ The Slint main window is being incrementally replaced with Qt QML. All panels (T
 ### Key Files
 - `src/ui_qt/mod.rs` — TransportBar QObject (play/stop/record/toggle-pool), module declarations
 - `src/ui_qt/state.rs` — `AppState` struct, `init()`/`get()`, `on_play()`/`on_stop()`/`on_toggle_record()`/`on_import_file()`
-- `src/ui_qt/state_bridge.rs` — StateBridge QObject (time_display, bpm_display, time_sig_display, undo/redo, loop toggle, sync_state)
+- `src/ui_qt/state_bridge.rs` — StateBridge QObject (time_secs, time_ms, bpm_val, time_sig_num, time_sig_denom as i32/f64 qproperties; get_time_display/get_bpm_display/get_time_sig_display as String qinvokables; undo/redo/loop toggle)
 - `src/ui_qt/pool.rs` — PoolModel QObject (pool_json qproperty, refresh, insert_pool_audio)
 - `src/ui_qt/effects.rs` — EffectEditor QObject (effect_json + compressor_gr qproperties, refresh, set_param, toggle_bypass, sync_gr, auto-refresh on selection change)
 - `src/ui_qt/mixer.rs` — MixerModel QObject (mixer_json + peaks_json qproperties, refresh, sync_peaks, set_volume, set_pan, toggle_mute, toggle_solo, toggle_arm, select_effect)
@@ -236,7 +241,7 @@ The Slint main window is being incrementally replaced with Qt QML. All panels (T
 ### Effect Editor Bridge Details
 
 **QProperties:**
-- `effect_json: QString` — JSON string with structure:
+- `effect_json: String` — JSON string with structure:
   ```json
   {
     "title": "Compressor",
@@ -270,8 +275,8 @@ Repeater {
 ### Mixer Panel Bridge Details
 
 **QProperties:**
-- `mixer_json: QString` — JSON array of strip objects (id, name, type, vol, pan, mut, sol, arm, out, fx[])
-- `peaks_json: QString` — JSON object mapping strip IDs to `{"l":0.5,"r":0.6}` peak pairs
+- `mixer_json: String` — JSON array of strip objects (id, name, type, vol, pan, mut, sol, arm, out, fx[])
+- `peaks_json: String` — JSON object mapping strip IDs to `{"l":0.5,"r":0.6}` peak pairs
 
 **QInvokables:**
 - `refresh()` — reads AppState project, builds full `mixer_json` (tracks + buses + master)
@@ -379,5 +384,5 @@ The git history has a checkpoint at `f5ec49c` ("checkpoint: effects, recording, 
 To commit current state:
 ```powershell
 git add -A
-git commit -m "Qt Phase 3: Mixer panel bridge + QML; auto-refresh effect editor on selection change; hybrid Slint/Qt with 4 floating windows"
+git commit -m "Qt Phase 3: Fix CXX-Qt String qproperty binding failures; unified Qt window with 7 QML panels; primitive qproperties + String qinvokables for display"
 ```
