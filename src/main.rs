@@ -28,6 +28,8 @@ fn main() {
         std::thread::spawn(|| {
             use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QUrl};
 
+            std::env::set_var("QT_QUICK_CONTROLS_STYLE", "Basic");
+
             let mut app = QGuiApplication::new();
             let mut engine = QQmlApplicationEngine::new();
 

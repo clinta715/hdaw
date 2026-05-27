@@ -28,18 +28,18 @@ ApplicationWindow {
         running: true
         repeat: true
         onTriggered: {
-            transport.syncState()
-            tl.syncPlayhead()
-            mixer.syncPeaks()
-            fx.syncGr()
-            state.syncState()
-            sc.syncState()
+            transport.sync_state()
+            tl.sync_playhead()
+            mixer.sync_peaks()
+            fx.sync_gr()
+            state.sync_state()
+            sc.sync_state()
 
             // auto-scroll during playback
             if (transport.playing) {
                 var vw = tlFlick.width
                 var sx = tlFlick.contentX
-                var px = tl.playheadX
+                var px = tl.playhead_x
                 if (px > sx + vw * 0.8) {
                     tlFlick.contentX = px - vw * 0.5
                 }
@@ -60,30 +60,30 @@ ApplicationWindow {
     }
 
     // ---- Keyboard Shortcuts ----
-    Shortcut { sequence: "Space";     onActivated: transport.togglePlayStop() }
+    Shortcut { sequence: "Space";     onActivated: transport.toggle_play_stop() }
     Shortcut { sequence: "Ctrl+Z";    onActivated: state.undo() }
     Shortcut { sequence: "Ctrl+Y";    onActivated: state.redo() }
-    Shortcut { sequence: "L";         onActivated: state.toggleLoop() }
-    Shortcut { sequence: "=";         onActivated: tl.zoomIn() }
-    Shortcut { sequence: "-";         onActivated: tl.zoomOut() }
-    Shortcut { sequence: "P";         onActivated: transport.togglePool() }
+    Shortcut { sequence: "L";         onActivated: state.toggle_loop() }
+    Shortcut { sequence: "=";         onActivated: tl.zoom_in() }
+    Shortcut { sequence: "-";         onActivated: tl.zoom_out() }
+    Shortcut { sequence: "P";         onActivated: transport.toggle_pool() }
     Shortcut { sequence: "Ctrl+M";    onActivated: mixerVisible = !mixerVisible }
-    Shortcut { sequence: "Ctrl+T";    onActivated: sc.addTrack() }
-    Shortcut { sequence: "Delete";    onActivated: sc.deleteSelected() }
-    Shortcut { sequence: "Ctrl+C";    onActivated: sc.copySelected() }
+    Shortcut { sequence: "Ctrl+T";    onActivated: sc.add_track() }
+    Shortcut { sequence: "Delete";    onActivated: sc.delete_selected() }
+    Shortcut { sequence: "Ctrl+C";    onActivated: sc.copy_selected() }
     Shortcut { sequence: "Ctrl+V";    onActivated: sc.paste() }
-    Shortcut { sequence: "Ctrl+A";    onActivated: sc.selectAll() }
-    Shortcut { sequence: "M";         onActivated: sc.toggleMuteSelectedTrack() }
-    Shortcut { sequence: "Home";      onActivated: sc.goToStart() }
-    Shortcut { sequence: "End";       onActivated: sc.goToEnd() }
-    Shortcut { sequence: "S";         onActivated: sc.toggleToolMode() }
-    Shortcut { sequence: "N";         onActivated: sc.toggleSnap() }
-    Shortcut { sequence: "Escape";    onActivated: sc.resetToolMode() }
-    Shortcut { sequence: "Left";      onActivated: sc.nudgeLeft() }
-    Shortcut { sequence: "Right";     onActivated: sc.nudgeRight() }
+    Shortcut { sequence: "Ctrl+A";    onActivated: sc.select_all() }
+    Shortcut { sequence: "M";         onActivated: sc.toggle_mute_selected_track() }
+    Shortcut { sequence: "Home";      onActivated: sc.go_to_start() }
+    Shortcut { sequence: "End";       onActivated: sc.go_to_end() }
+    Shortcut { sequence: "S";         onActivated: sc.toggle_tool_mode() }
+    Shortcut { sequence: "N";         onActivated: sc.toggle_snap() }
+    Shortcut { sequence: "Escape";    onActivated: sc.reset_tool_mode() }
+    Shortcut { sequence: "Left";      onActivated: sc.nudge_left() }
+    Shortcut { sequence: "Right";     onActivated: sc.nudge_right() }
 
     // ---- Visibility toggles ----
-    property bool poolVisible: transport.poolVisible
+    property bool poolVisible: transport.pool_visible
     property bool fxVisible: false
     property bool mixerVisible: true
 
@@ -126,7 +126,7 @@ ApplicationWindow {
 
                 Button {
                     text: "\u25CF"
-                    onClicked: transport.toggleRecord()
+                    onClicked: transport.toggle_record()
                     implicitWidth: 36
                     implicitHeight: 28
                     flat: true
@@ -139,7 +139,7 @@ ApplicationWindow {
                 Rectangle { width: 1; height: parent.height - 4; color: "#444444" }
 
                 Label {
-                    text: state.timeDisplay
+                    text: state.time_display
                     color: "#cccccc"
                     font.pixelSize: 13
                     font.bold: true
@@ -148,7 +148,7 @@ ApplicationWindow {
                 }
 
                 Label {
-                    text: state.bpmDisplay
+                    text: state.bpm_display
                     color: "#888888"
                     font.pixelSize: 11
                     Layout.preferredWidth: 80
@@ -156,7 +156,7 @@ ApplicationWindow {
                 }
 
                 Label {
-                    text: state.timeSigDisplay
+                    text: state.time_sig_display
                     color: "#888888"
                     font.pixelSize: 11
                     Layout.preferredWidth: 40
@@ -171,7 +171,7 @@ ApplicationWindow {
                     implicitWidth: 32
                     implicitHeight: 28
                     flat: true
-                    enabled: state.undoAvailable
+                    enabled: state.undo_available
                     opacity: enabled ? 1.0 : 0.3
                 }
 
@@ -181,7 +181,7 @@ ApplicationWindow {
                     implicitWidth: 32
                     implicitHeight: 28
                     flat: true
-                    enabled: state.redoAvailable
+                    enabled: state.redo_available
                     opacity: enabled ? 1.0 : 0.3
                 }
 
@@ -189,12 +189,12 @@ ApplicationWindow {
 
                 Button {
                     text: "Loop"
-                    onClicked: state.toggleLoop()
+                    onClicked: state.toggle_loop()
                     implicitWidth: 50
                     implicitHeight: 28
                     flat: true
                     background: Rectangle {
-                        color: state.loopEnabled ? "#3a3a5c" : "transparent"
+                        color: state.loop_enabled ? "#3a3a5c" : "transparent"
                         radius: 3
                     }
                 }
@@ -203,7 +203,7 @@ ApplicationWindow {
 
                 Button {
                     text: "Import"
-                    onClicked: transport.importFile()
+                    onClicked: transport.import_file()
                     implicitWidth: 60
                     implicitHeight: 28
                     flat: true
@@ -211,7 +211,7 @@ ApplicationWindow {
 
                 Button {
                     text: "Pool"
-                    onClicked: transport.togglePool()
+                    onClicked: transport.toggle_pool()
                     implicitWidth: 50
                     implicitHeight: 28
                     flat: true
@@ -303,7 +303,7 @@ ApplicationWindow {
                                 id: mouseArea
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                onClicked: poolModel.insertPoolAudio(model.path)
+                                onClicked: poolModel.insert_pool_audio(model.path)
                             }
 
                             ColumnLayout {
@@ -344,7 +344,7 @@ ApplicationWindow {
 
                 Connections {
                     target: poolModel
-                    onPoolJsonChanged: poolArea.updatePool(poolModel.poolJson)
+                    function onPool_jsonChanged() { poolArea.updatePool(poolModel.pool_json) }
                 }
 
                 Component.onCompleted: poolModel.refresh()
@@ -423,8 +423,8 @@ ApplicationWindow {
 
                     Item {
                         id: tlContent
-                        width: totalWidth
-                        height: totalHeight
+                        width: timelineArea.totalWidth
+                        height: timelineArea.totalHeight
 
                         // Ruler ticks
                         Repeater {
@@ -533,16 +533,16 @@ ApplicationWindow {
                         // Drag overlay (relative to content)
                         Rectangle {
                             id: dragOverlay
-                            x: tl.dragOverlayX
-                            y: tl.dragOverlayY
-                            width: tl.dragOverlayW
-                            height: tl.dragOverlayH
-                            color: tl.dragOverlayColor
+                            x: tl.drag_overlay_x
+                            y: tl.drag_overlay_y
+                            width: tl.drag_overlay_w
+                            height: tl.drag_overlay_h
+                            color: tl.drag_overlay_color
                             opacity: 0.35
                             border.color: "#ffffff"
                             border.width: 1
                             radius: 3
-                            visible: tl.dragActive
+                            visible: tl.drag_active
                             z: 30
                         }
 
@@ -552,16 +552,16 @@ ApplicationWindow {
                             anchors.fill: parent
                             hoverEnabled: true
                             acceptedButtons: Qt.LeftButton
-                            onPressed: tl.onTimelinePressed(mouseX, mouseY)
+                            onPressed: tl.on_timeline_pressed(mouseX, mouseY)
                             onMouseXChanged: {
-                                if (pressed) tl.onTimelineMoved(mouseX, mouseY)
+                                if (pressed) tl.on_timeline_moved(mouseX, mouseY)
                             }
                             onMouseYChanged: {
-                                if (pressed) tl.onTimelineMoved(mouseX, mouseY)
+                                if (pressed) tl.on_timeline_moved(mouseX, mouseY)
                             }
-                            onReleased: tl.onTimelineReleased()
+                            onReleased: tl.on_timeline_released()
                             cursorShape: {
-                                var ct = tl.cursorType
+                                var ct = tl.cursor_type
                                 if (ct === 0) return Qt.ArrowCursor
                                 if (ct === 2) return Qt.PointingHandCursor
                                 if (ct === 3) return Qt.SizeHorCursor
@@ -574,7 +574,7 @@ ApplicationWindow {
 
                         // Playhead (relative to content)
                         Rectangle {
-                            x: tl.playheadX - 1
+                            x: tl.playhead_x - 1
                             y: 0
                             width: 2
                             height: tlContent.height
@@ -603,7 +603,7 @@ ApplicationWindow {
                             implicitHeight: 16
                             flat: true
                             font.pixelSize: 10
-                            onClicked: tl.zoomIn()
+                            onClicked: tl.zoom_in()
                         }
                         Button {
                             text: "-"
@@ -611,7 +611,7 @@ ApplicationWindow {
                             implicitHeight: 16
                             flat: true
                             font.pixelSize: 10
-                            onClicked: tl.zoomOut()
+                            onClicked: tl.zoom_out()
                         }
                     }
                 }
@@ -681,7 +681,7 @@ ApplicationWindow {
 
                 Connections {
                     target: tl
-                    onTimelineJsonChanged: timelineArea.updateTimeline(tl.timelineJson)
+                    function onTimeline_jsonChanged() { timelineArea.updateTimeline(tl.timeline_json) }
                 }
 
                 Component.onCompleted: tl.refresh()
@@ -695,6 +695,10 @@ ApplicationWindow {
                 visible: fxVisible
                 clip: true
                 color: "#121212"
+
+                property string fxTitle: ""
+                property bool fxBypassed: false
+                property real grValue: 0.0
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -771,7 +775,7 @@ ApplicationWindow {
                                     font.pixelSize: 10
                                     onCheckedChanged: {
                                         if (!pressed) { return }
-                                        fx.toggleBypass()
+                                        fx.toggle_bypass()
                                     }
                                 }
                                 Rectangle {
@@ -804,7 +808,7 @@ ApplicationWindow {
                                             to: model.max
                                             value: model.value
                                             stepSize: Math.max((model.max - model.min) / 200, 0.001)
-                                            onMoved: fx.setParam(model.name, value)
+                                            onMoved: fx.set_param(model.name, value)
                                         }
                                     }
                                 }
@@ -844,10 +848,6 @@ ApplicationWindow {
                 ListModel { id: chainModel }
                 ListModel { id: paramModel }
 
-                property string fxTitle: ""
-                property bool fxBypassed: false
-                property real grValue: 0.0
-
                 function updateEffect(jsonStr) {
                     var data = JSON.parse(jsonStr)
                     if (!data.title) {
@@ -884,11 +884,11 @@ ApplicationWindow {
 
                 Connections {
                     target: fx
-                    onEffectJsonChanged: fxArea.updateEffect(fx.effectJson)
+                    function onEffect_jsonChanged() { fxArea.updateEffect(fx.effect_json) }
                 }
                 Connections {
                     target: fx
-                    onCompressorGrChanged: { grValue = fx.compressorGr }
+                    function onCompressor_grChanged() { grValue = fx.compressor_gr }
                 }
 
                 Component.onCompleted: fx.refresh()
@@ -952,7 +952,7 @@ ApplicationWindow {
                                         }
                                         MouseArea {
                                             anchors.fill: parent
-                                            onClicked: mixer.selectEffect(model.id, index)
+                                            onClicked: mixer.select_effect(model.id, index)
                                         }
                                     }
                                 }
@@ -1026,7 +1026,7 @@ ApplicationWindow {
                                 to: 1.0
                                 value: model.vol || 1.0
                                 stepSize: 0.01
-                                onMoved: mixer.setVolume(model.id, value)
+                                onMoved: mixer.set_volume(model.id, value)
                                 background: Rectangle {
                                     x: volSlider.leftPadding + volSlider.width / 2 - 2
                                     y: volSlider.topPadding
@@ -1070,7 +1070,7 @@ ApplicationWindow {
                                     }
                                     MouseArea {
                                         anchors.fill: parent
-                                        onClicked: mixer.toggleMute(model.id)
+                                        onClicked: mixer.toggle_mute(model.id)
                                     }
                                 }
 
@@ -1089,7 +1089,7 @@ ApplicationWindow {
                                     }
                                     MouseArea {
                                         anchors.fill: parent
-                                        onClicked: mixer.toggleSolo(model.id)
+                                        onClicked: mixer.toggle_solo(model.id)
                                     }
                                 }
 
@@ -1109,7 +1109,7 @@ ApplicationWindow {
                                     }
                                     MouseArea {
                                         anchors.fill: parent
-                                        onClicked: mixer.toggleArm(model.id)
+                                        onClicked: mixer.toggle_arm(model.id)
                                     }
                                 }
                             }
@@ -1178,12 +1178,12 @@ ApplicationWindow {
 
             Connections {
                 target: mixer
-                onMixerJsonChanged: mixerArea.buildStrips(mixer.mixerJson)
+                function onMixer_jsonChanged() { mixerArea.buildStrips(mixer.mixer_json) }
             }
 
             Connections {
                 target: mixer
-                onPeaksJsonChanged: mixerArea.updatePeaks(mixer.peaksJson)
+                function onPeaks_jsonChanged() { mixerArea.updatePeaks(mixer.peaks_json) }
             }
 
             Component.onCompleted: mixer.refresh()

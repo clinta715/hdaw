@@ -133,6 +133,12 @@ Timer (60fps Qt): reads compressor GR via EffectEditor::sync_gr()
       .files(["src/ui_qt/mod.rs", ...])
       .build();
       ```
+16. **CXX-Qt 0.8 exposes EVERYTHING in snake_case to QML** — `#[qproperty(String, pool_json)]` becomes the QML property `pool_json` (NOT `poolJson`). `#[qinvokable] fn sync_state(...)` becomes `sync_state()` (NOT `syncState()`). Change signals are `pool_jsonChanged` (NOT `poolJsonChanged`). The QML `Connections` handler is `function onPool_jsonChanged()` (NOT `onPoolJsonChanged`). This applies to ALL bridge types uniformly:
+    - **Property names**: Match the Rust `#[qproperty]` field name verbatim (e.g., `time_display`, `undo_available`, `drag_active`, `cursor_type`)
+    - **Method names**: Match the Rust `#[qinvokable] fn` name verbatim (e.g., `sync_state()`, `toggle_play_stop()`, `insert_pool_audio()`)
+    - **Signal handlers**: Follow Qt convention — `on` + capitalized signal name, where the signal name is the Rust qproperty name verbatim (e.g., `onPool_jsonChanged`, `onEffect_jsonChanged`, `onTimeline_jsonChanged`)
+    - **Connections syntax (Qt 6)**: Use `function onFoo_bar() { ... }` not the deprecated `onFooBar: { ... }` form
+    - **Style customization**: Windows native style rejects custom `background` on Buttons. Set `QT_QUICK_CONTROLS_STYLE=Basic` or `Fusion` before creating `QGuiApplication`
 
 ---
 
@@ -209,7 +215,7 @@ The Slint main window is being incrementally replaced with Qt QML. All panels (T
 - **Shared state**: `OnceLock<AppState>` in `src/ui_qt/state.rs`
 - **QML**: `src/ui_qt/main.qml` — single `ApplicationWindow` with integrated panels
 - **Main entry**: `main.rs` spawns Qt event loop on a separate thread
-- **QML module loading**: See pitfall #14 below for critical build.rs/main.rs/QML import pattern
+- **QML module loading**: See pitfalls #15 (build setup) and #16 (snake_case naming) for critical patterns
 
 ### Key Files
 - `src/ui_qt/mod.rs` — TransportBar QObject (play/stop/record/toggle-pool), module declarations
@@ -221,7 +227,7 @@ The Slint main window is being incrementally replaced with Qt QML. All panels (T
 - `src/ui_qt/timeline.rs` — TimelineModel QObject (timeline_json + playhead_x + pixels_per_second qproperties, refresh, sync_playhead, zoom_in, zoom_out)
 - `src/ui_qt/main.qml` — Single root ApplicationWindow with all panels integrated (replaces transport.qml)
 - `src/app/callbacks.rs` — Slint-to-Qt effect selection sync (cfg-gated)
-- `build.rs` — `.file(...)` entries for all 6 bridge modules
+- `build.rs` — `CxxQtBuilder::new_qml_module(QmlModule::new("com.hdaw").qml_file(...)).files([...])` entries for all 7 bridge modules
 
 ### Effect Editor Bridge Details
 
