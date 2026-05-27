@@ -260,40 +260,4 @@ pub fn compute_eq_response(
     response
 }
 
-pub fn render_eq_curve_image(response: &[f32], width: u32, height: u32) -> slint::Image {
-    let w = width as usize;
-    let h = height as usize;
-    let mut pixels = vec![0u8; w * h * 4];
-    let db_min = -12.0f32;
-    let db_max = 12.0f32;
-    let half_h = h as f32 * 0.5;
-    let n = response.len();
 
-    for i in 0..w {
-        let idx = if n > 1 { (i as f32 / (w - 1) as f32) * (n - 1) as f32 } else { 0.0 };
-        let idx0 = idx.floor() as usize;
-        let idx1 = (idx0 + 1).min(n - 1);
-        let frac = idx - idx0 as f32;
-        let db = response[idx0] * (1.0 - frac) + response[idx1] * frac;
-        let db_clamped = db.clamp(db_min, db_max);
-        let y_frac = (db_clamped - db_min) / (db_max - db_min);
-        let y = (half_h - (y_frac - 0.5) * h as f32) as i32;
-
-        for row in 0..h {
-            let pi = (row * w + i) * 4;
-            let dy = (row as i32 - y).abs();
-            if dy <= 1 {
-                pixels[pi] = 100;
-                pixels[pi + 1] = 200;
-                pixels[pi + 2] = 255;
-                pixels[pi + 3] = 255;
-            } else {
-                pixels[pi + 3] = 0;
-            }
-        }
-    }
-
-    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
-    buf.make_mut_bytes().copy_from_slice(&pixels);
-    slint::Image::from_rgba8_premultiplied(buf)
-}

@@ -1,4 +1,5 @@
 use crate::audio::buffer::AudioBuffer;
+use base64::Engine;
 
 #[derive(Debug, Clone)]
 pub struct WaveformPeaks {
@@ -59,17 +60,15 @@ pub fn generate_waveform_cache(buffer: &AudioBuffer, width: usize) -> WaveformPe
     WaveformPeaks::generate(buffer, width)
 }
 
-pub fn render_waveform_image(peaks: &WaveformPeaks, width: u32, height: u32) -> slint::Image {
-    let w = width as usize;
-    let h = height as usize;
-    let mut pixels = vec![0u8; w * h * 4];
+pub fn render_waveform_data_url(peaks: &WaveformPeaks, width: u32, height: u32) -> String {
+    let w = width.max(1) as usize;
+    let h = height.max(1) as usize;
     let num_peaks = peaks.min.len();
     if num_peaks == 0 {
-        let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
-        buf.make_mut_bytes().fill(0);
-        return slint::Image::from_rgba8_premultiplied(buf);
+        return String::new();
     }
 
+    let mut pixels = vec![0u8; w * h * 4];
     let mid = h as f32 * 0.5;
     for x in 0..w {
         let idx = (x as f32 / (w - 1).max(1) as f32) * (num_peaks - 1) as f32;
@@ -97,7 +96,9 @@ pub fn render_waveform_image(peaks: &WaveformPeaks, width: u32, height: u32) -> 
         }
     }
 
-    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
-    buf.make_mut_bytes().copy_from_slice(&pixels);
-    slint::Image::from_rgba8_premultiplied(buf)
+    let img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, pixels).unwrap();
+    let mut png_bytes = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png).unwrap();
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+    format!("data:image/png;base64,{}", b64)
 }

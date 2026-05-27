@@ -15,6 +15,22 @@ cargo build 2>&1 | Select-String "^error"
 
 No test suite yet. Visual verification is manual — run the app and interact.
 
+### Qt Feature Build (optional)
+
+```powershell
+# Prerequisite: Install Qt 6.7+ SDK (tested with 6.11.1)
+# Select MSVC 2022 64-bit, Qt Quick Controls + Layouts
+$env:QMAKE = "C:\Qt\6.11.1\msvc2022_64\bin\qmake.exe"
+
+# Build with hybrid Qt+Slint transport bar
+cargo build --features qt
+
+# Run
+cargo run --features qt
+```
+
+The `qt` feature is gated — default `cargo build` is Slint-only. With `--features qt`, a floating Qt transport toolbar spawns alongside the Slint main window.
+
 ---
 
 ## Architecture Notes
@@ -69,12 +85,20 @@ User Input (Slint TouchArea)
         → PlaybackManager::update_*()
             → PlaybackState (Arc<Mutex>)
                 → cpal audio callback → fill_buffer() → output
-                    
+
+Qt QML Input
+    → QObject qinvokable → state.rs callbacks or bridge methods
+        → project.lock() + undo + PlaybackManager
+        → timeline_dirty flag → picked up by Slint 60fps timer
+
 UI Sync: app.rs re-reads project + calls sync_project_to_timeline_with_waveforms()
     → updates all Slint models (clips, tracks, buses, ruler ticks, etc.)
 
-Timer (60fps): reads position, peaks, GR from PlaybackManager
+Timer (60fps Slint): reads position, peaks, GR from PlaybackManager
     → updates playhead-x, peak bars, compressor-gr
+
+Timer (60fps Qt): reads compressor GR via EffectEditor::sync_gr()
+    → updates compressor_gr qproperty → GR meter bar width
 ```
 
 ---
@@ -88,6 +112,29 @@ Timer (60fps): reads position, peaks, GR from PlaybackManager
 5. **Main window filename**: The `slint!` macro embedded an image path `@image-url("")` — this MUST match what Slint generates from the filename. If the file is renamed, update the component name `MainWindow` accordingly.
 6. **`fill_buffer()` brace structure**: There are TWO separate `for track in &tracks` loops (effects processing then mixing) and TWO `for bus in &buses` loops. When editing either block, use full-context oldString to avoid matching the wrong one and creating orphaned braces.
 7. **Automation lane parameter names**: Lane's `parameter_id` is a globally unique string (e.g., `"volume"`, `"eq_low_gain"`). Effect param automation is matched to effects at playback time via `effect.get_parameter(name)` — no effect index needed.
+8. **Qt build missing `.file()`**: CXX-Qt 0.8 requires explicit source file paths in `build.rs` via `.file("src/ui_qt/mod.rs")`. Without this, no C++ code is generated for bridge modules, causing linker errors (`unresolved external symbol ...`).
+9. **CXX-Qt bridge syntax (0.8)**: Use `extern "RustQt"` block for QObject + qinvokable declarations. Method implementations go OUTSIDE the bridge module: `impl transport_object::TransportBar { ... }`. `use` items go outside the bridge; `unsafe extern "C++"` goes inside for type declarations.
+10. **`QString` qproperty issues**: Declaring `type QString = cxx_qt_lib::QString;` inside a bridge causes CXX ExternType::Id mismatch. Avoid QString in qproperties for now — use primitive types (`bool`, `i32`, `f64`).
+11. **Qt app lifecycle**: `QGuiApplication::new()` takes no args (auto-collects). Event loop runs via `app.exec()` not `cxx_qt::exec()`. QML is loaded via `engine.load(&QUrl::from("qrc:/qt/qml/com/hdaw/src/ui_qt/main.qml"))` — uses Qt resource system (qrc), NOT `load_data()` or `load_url()` which don't set up module resolution. See pitfall #15 for the full module setup.
+12. **QML slider + ListModel**: When using `Repeater { model: ListModel }` for parameter sliders, `onMoved` fires during user drag while `onValueChanged` fires for any value change (including programmatic). Use `onMoved` for drag-to-update. Do NOT call `refresh()` after `set_param` — that would clear+repopulate the model, recreating all delegates and resetting slider positions.
+13. **Multiple ApplicationWindows in one QML file**: `QQmlApplicationEngine` loads a single root QML file. Additional windows MUST be `ApplicationWindow` instances declared inside that file (not separate files). QML properties from one window can reference objects in other windows by ID.
+14. **JSON to QML pattern**: Dynamic models (pool entries, effect params) are serialized to JSON strings in Rust and `JSON.parse`d in QML to populate `ListModel` entries. Each bridge has an `on<Property>Changed` signal + `updateXxx()` JS function.
+15. **QML module discovery (critical)**: CXX-Qt 0.8's `#[qml_element]` types are NOT automatically discoverable by the QML engine. Three things are required:
+    - **`build.rs` MUST have `.qml_module()`** — Without it, `QML_NAMED_ELEMENT` compiles into C++ but no `.qmldir`/plugin is generated, and QML sees "module is not installed" errors.
+    - **`main.rs` MUST use `engine.load(&QUrl::from("qrc:/qt/qml/..."))`** — `load_data()`/`load_url()` don't set up Qt's QML module resolution. The qrc URL pattern follows the QML file path: `qrc:/qt/qml/<uri_with_slashes>/<file_path>` (e.g., `qrc:/qt/qml/com/hdaw/src/ui_qt/main.qml`).
+    - **`main.qml` imports MUST match the module URI** — `import com.hdaw 1.0` (not `import ui_qt.*`). All `#[qml_element]` types become available under this single import.
+    - **`cxx-qt-build` MUST have `link_qt_object_files` feature** — Required for pure Cargo builds (no CMake) to statically link Qt object files.
+    - Example `build.rs`:
+      ```rust
+      CxxQtBuilder::new_qml_module(
+          QmlModule::new("com.hdaw").qml_file("src/ui_qt/main.qml"),
+      )
+      .qt_module("Quick")
+      .files(["src/ui_qt/mod.rs", ...])
+      .build();
+      ```
+
+---
 
 ## Automation Architecture
 
@@ -114,6 +161,179 @@ UI flow:
   "+A" button in track strip → cycles: volume → pan → effect_params → (none) → volume...
   Point editing: click-to-add, drag-to-move, undo/redo supported
 ```
+
+---
+
+## Shared AppState Architecture (Qt Migration)
+
+### State Overview (`src/ui_qt/state.rs`)
+
+```rust
+pub struct AppState {
+    pub project: Arc<Mutex<Project>>,
+    pub playback: PlaybackManager,
+    pub undo_stack: Arc<Mutex<UndoStack>>,
+    pub waveform_peaks: Arc<Mutex<HashMap<String, WaveformPeaks>>>,
+    pub pool_visible: Arc<AtomicBool>,
+    pub timeline_dirty: Arc<AtomicBool>,
+    pub selected_effect_target: Arc<Mutex<Option<String>>>,   // UUID of track/bus
+    pub selected_effect_index: Arc<Mutex<Option<i32>>>,       // index in effects_chain
+    pub selected_effect_is_track: Arc<AtomicBool>,            // true=track, false=bus
+}
+```
+
+Stored in a `OnceLock<AppState>` initialized by `state::init(state)` in `main.rs`. Access via `state::get()` which returns `Option<&'static AppState>`. All fields are thread-safe (`Arc<Mutex<>>` or `Arc<AtomicBool>`).
+
+### Sync From Slint to Qt
+Slint callbacks in `callbacks.rs` conditionally write to AppState with `#[cfg(feature = "qt")]`:
+```rust
+#[cfg(feature = "qt")]
+if let Some(state) = crate::ui_qt::state::get() {
+    if let Ok(mut target) = state.selected_effect_target.lock() { *target = Some(...); }
+}
+```
+
+### Sync From Qt to Slint
+Qt bridges set `timeline_dirty = true` or `pool_visible = true` atomics. The Slint 60fps timer in `app/mod.rs` reads these and syncs.
+
+---
+
+## Qt Migration (Phase 5 — Stage 1 Complete, QML Loading Fixed)
+
+The Slint main window is being incrementally replaced with Qt QML. All panels (Transport, Pool, Effect Editor, Mixer, Timeline, State Bridge) now use a single integrated Qt window.
+
+### Current State
+- **Single unified Qt window**: All panels integrated in `main.qml` under a single `ApplicationWindow`
+- **Feature-gated**: `cargo build` = Slint-only; `cargo build --features qt` = Qt
+- **CXX-Qt 0.8.1** bridges defined in `src/ui_qt/mod.rs`, `src/ui_qt/pool.rs`, `src/ui_qt/effects.rs`, `src/ui_qt/mixer.rs`, `src/ui_qt/timeline.rs`, `src/ui_qt/state_bridge.rs`, `src/ui_qt/shortcut_handler.rs`
+- **Shared state**: `OnceLock<AppState>` in `src/ui_qt/state.rs`
+- **QML**: `src/ui_qt/main.qml` — single `ApplicationWindow` with integrated panels
+- **Main entry**: `main.rs` spawns Qt event loop on a separate thread
+- **QML module loading**: See pitfall #14 below for critical build.rs/main.rs/QML import pattern
+
+### Key Files
+- `src/ui_qt/mod.rs` — TransportBar QObject (play/stop/record/toggle-pool), module declarations
+- `src/ui_qt/state.rs` — `AppState` struct, `init()`/`get()`, `on_play()`/`on_stop()`/`on_toggle_record()`/`on_import_file()`
+- `src/ui_qt/state_bridge.rs` — StateBridge QObject (time_display, bpm_display, time_sig_display, undo/redo, loop toggle, sync_state)
+- `src/ui_qt/pool.rs` — PoolModel QObject (pool_json qproperty, refresh, insert_pool_audio)
+- `src/ui_qt/effects.rs` — EffectEditor QObject (effect_json + compressor_gr qproperties, refresh, set_param, toggle_bypass, sync_gr, auto-refresh on selection change)
+- `src/ui_qt/mixer.rs` — MixerModel QObject (mixer_json + peaks_json qproperties, refresh, sync_peaks, set_volume, set_pan, toggle_mute, toggle_solo, toggle_arm, select_effect)
+- `src/ui_qt/timeline.rs` — TimelineModel QObject (timeline_json + playhead_x + pixels_per_second qproperties, refresh, sync_playhead, zoom_in, zoom_out)
+- `src/ui_qt/main.qml` — Single root ApplicationWindow with all panels integrated (replaces transport.qml)
+- `src/app/callbacks.rs` — Slint-to-Qt effect selection sync (cfg-gated)
+- `build.rs` — `.file(...)` entries for all 6 bridge modules
+
+### Effect Editor Bridge Details
+
+**QProperties:**
+- `effect_json: QString` — JSON string with structure:
+  ```json
+  {
+    "title": "Compressor",
+    "bypassed": false,
+    "effect_type": "Compressor",
+    "idx": 1,
+    "params": [{"name":"comp_threshold","label":"Threshold","value":-20.0,"min":-60.0,"max":0.0,"display":"-20.0dB"}],
+    "chain": [{"name":"Equalizer","idx":0,"selected":false}]
+  }
+  ```
+- `compressor_gr: f64` — raw gain reduction value, polled at 60fps
+
+**QInvokables:**
+- `refresh()` — reads AppState selection, builds JSON, sets `effect_json`
+- `set_param(param_name, value)` — reads selection, locks project, updates EffectInstance + undo + PlaybackManager DSP
+- `toggle_bypass()` — reads selection, toggles bypass in project + undo + PlaybackManager, refreshes JSON
+- `sync_gr()` — reads selection, calls `PlaybackManager::get_compressor_gr()`, sets `compressor_gr`
+
+**QML pattern for param sliders:**
+```qml
+Repeater {
+    model: paramModel  // ListModel populated from JSON
+    Slider {
+        from: model.min; to: model.max; value: model.value
+        onMoved: fx.setParam(model.name, value)  // NOT fx.refresh()
+    }
+}
+```
+`set_param` does NOT update the JSON — the slider position is the truth during drag. JSON only updates on `refresh()` (new selection) or `toggle_bypass()`.
+
+### Mixer Panel Bridge Details
+
+**QProperties:**
+- `mixer_json: QString` — JSON array of strip objects (id, name, type, vol, pan, mut, sol, arm, out, fx[])
+- `peaks_json: QString` — JSON object mapping strip IDs to `{"l":0.5,"r":0.6}` peak pairs
+
+**QInvokables:**
+- `refresh()` — reads AppState project, builds full `mixer_json` (tracks + buses + master)
+- `sync_peaks()` — reads `PlaybackManager::get_track_peaks()`, `get_bus_peaks()`, `get_master_peak()`, sets `peaks_json`
+- `set_volume(strip_id, value)` — locks project, updates track/bus/master volume + undo + PlaybackManager
+- `set_pan(strip_id, value)` — same for pan
+- `toggle_mute(strip_id)` — toggles mute in project + PlaybackManager
+- `toggle_solo(strip_id)` — toggles solo in project + PlaybackManager
+- `toggle_arm(strip_id)` — toggles record arm (tracks only)
+- `select_effect(strip_id, effect_idx)` — writes to AppState selection atomics (opens effect editor)
+
+**Split data strategy** (avoids 60fps delegate recreation):
+1. `mixer_json` is updated by `refresh()` on a 300ms timer (picks up Slint-side changes) and on `Component.onCompleted`.
+2. `peaks_json` is updated by `sync_peaks()` on a 16ms timer (60fps peak meters).
+3. QML `updatePeaks()` updates peaks in-place via `item.peakL = value` — no delegate recreation.
+4. QML `buildStrips()` compares strip IDs before clearing/repopulating the model. If same IDs exist, skips rebuild entirely.
+
+**Auto-refresh on selection change (in effects.rs):**
+The effect editor's `sync_gr()` method (called 60fps) detects selection changes by comparing current AppState selection against a `static LAST_SELECTION: Mutex<Option<(String, i32, bool)>>`. When the selection differs, it auto-refreshes the effect JSON. This ensures clicking an effect slot in the mixer immediately updates the effect editor panel.
+
+### Next Steps (Phase 4+)
+1. **Phase 4**: Qt Timeline + Track Headers — waveform clips, ruler, automation lanes
+2. **Phase 5**: Unified Main Window — replace Slint `run()` entirely
+
+---
+
+## Effects Architecture Reference
+
+### Effect Trait
+```rust
+pub trait Effect: Send + Sync {
+    fn process(&mut self, buffer: &mut AudioBuffer);
+    fn get_parameter(&self, name: &str) -> Option<f32>;
+    fn set_parameter(&mut self, name: &str, value: f32);
+    fn get_name(&self) -> &str;
+    fn is_bypassed(&self) -> bool;
+    fn set_bypassed(&mut self, bypassed: bool);
+    fn get_gain_reduction(&self) -> f32 { 0.0 }  // override by Compressor
+}
+```
+
+### EffectInstance (project data model)
+```rust
+pub struct EffectInstance {
+    pub id: Uuid,
+    pub effect_type: String,  // "Equalizer" | "Compressor" | "Reverb" | "Delay"
+    pub bypass: bool,
+    pub parameters: HashMap<String, f32>,
+}
+```
+
+### Parameters by Effect Type
+| Effect | Parameter | Min | Max | Display |
+|--------|-----------|-----|-----|---------|
+| Equalizer | eq_low_freq | 20 | 500 Hz | {:.0}Hz |
+| | eq_low_gain | -12 | +12 dB | {:.1}dB |
+| | eq_mid_freq | 200 | 5000 Hz | {:.0}Hz |
+| | eq_mid_gain | -12 | +12 dB | {:.1}dB |
+| | eq_mid_q | 0.1 | 10 | {:.2} |
+| | eq_high_freq | 2000 | 20000 Hz | {:.0}Hz |
+| | eq_high_gain | -12 | +12 dB | {:.1}dB |
+| Compressor | comp_threshold | -60 | 0 dB | {:.1}dB |
+| | comp_ratio | 1 | 20 :1 | {:.1}:1 |
+| | comp_attack | 0.001 | 1.0 s | {:.1}ms |
+| | comp_release | 0.01 | 2.0 s | {:.0}ms |
+| | comp_makeup | -20 | +20 dB | {:.1}dB |
+| Reverb | reverb_room_size | 0 | 1 | {:.0}% |
+| | reverb_damping | 0 | 1 | {:.0}% |
+| | reverb_wet_dry | 0 | 1 | {:.0}% |
+| Delay | delay_time | 0.001 | 5.0 s | {:.0}ms |
+| | delay_feedback | 0 | 0.95 | {:.0}% |
+| | delay_mix | 0 | 1 | {:.0}% |
 
 ---
 
@@ -149,5 +369,5 @@ The git history has a checkpoint at `f5ec49c` ("checkpoint: effects, recording, 
 To commit current state:
 ```powershell
 git add -A
-git commit -m "automation MVP: lane UI, point editing, effect param automation, undo/redo"
+git commit -m "Qt Phase 3: Mixer panel bridge + QML; auto-refresh effect editor on selection change; hybrid Slint/Qt with 4 floating windows"
 ```
