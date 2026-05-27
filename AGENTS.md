@@ -139,6 +139,10 @@ Timer (60fps Qt): reads compressor GR via EffectEditor::sync_gr()
     - **Signal handlers**: Follow Qt convention — `on` + capitalized signal name, where the signal name is the Rust qproperty name verbatim (e.g., `onPool_jsonChanged`, `onEffect_jsonChanged`, `onTimeline_jsonChanged`)
     - **Connections syntax (Qt 6)**: Use `function onFoo_bar() { ... }` not the deprecated `onFooBar: { ... }` form
     - **Style customization**: Windows native style rejects custom `background` on Buttons. Set `QT_QUICK_CONTROLS_STYLE=Basic` or `Fusion` before creating `QGuiApplication`
+17. **Button `background:` rejection bypass**: Even with `QT_QUICK_CONTROLS_STYLE=Basic` set in a `thread::spawn`, Windows native style may still reject custom `background:` on `Button`. The robust workaround: replace `Button { background: Rectangle {...} }` with a plain `Rectangle + MouseArea + Text` — avoids Qt Quick Controls entirely for those buttons. Form buttons without custom backgrounds (Stop, Undo, Redo, Import) work fine as `Button { flat: true }`.
+18. **CXX-Qt `String` qproperty → QML JS type mismatch**: `#[qproperty(String, name)]` exposes a `rust::cxxbridge1::String` to QML — NOT a standard JS `String`. Two consequences:
+    - **Label/color assignment fails**: `Label { text: state.time_display }` produces "Unable to assign rust::cxxbridge1::String to QString". Fix: coerce with `"" + state.time_display`.
+    - **`JSON.parse()` fails on empty strings**: The Rust default `""` may not be falsy in QML JS. `if (!jsonStr \|\| jsonStr.length === 0)` guards do NOT catch it. Fix: use `try { data = JSON.parse(jsonStr) } catch (e) { return }` — catches any non-JSON input including CXX string bridging artifacts.
 
 ---
 

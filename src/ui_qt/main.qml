@@ -104,15 +104,21 @@ ApplicationWindow {
                 anchors.rightMargin: 4
                 spacing: 4
 
-                Button {
-                    text: "\u25B6"
-                    onClicked: transport.play()
-                    implicitWidth: 36
-                    implicitHeight: 28
-                    flat: true
-                    background: Rectangle {
-                        color: transport.playing ? "#1a5c1a" : "transparent"
-                        radius: 3
+                Rectangle {
+                    Layout.preferredWidth: 36
+                    Layout.preferredHeight: 28
+                    radius: 3
+                    color: transport.playing ? "#1a5c1a" : "transparent"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "\u25B6"
+                        color: "#cccccc"
+                        font.pixelSize: 14
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: transport.play()
                     }
                 }
 
@@ -124,22 +130,28 @@ ApplicationWindow {
                     flat: true
                 }
 
-                Button {
-                    text: "\u25CF"
-                    onClicked: transport.toggle_record()
-                    implicitWidth: 36
-                    implicitHeight: 28
-                    flat: true
-                    background: Rectangle {
-                        color: transport.recording ? "#5c1a1a" : "transparent"
-                        radius: 3
+                Rectangle {
+                    Layout.preferredWidth: 36
+                    Layout.preferredHeight: 28
+                    radius: 3
+                    color: transport.recording ? "#5c1a1a" : "transparent"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "\u25CF"
+                        color: "#ff8888"
+                        font.pixelSize: 14
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: transport.toggle_record()
                     }
                 }
 
                 Rectangle { width: 1; height: parent.height - 4; color: "#444444" }
 
                 Label {
-                    text: state.time_display
+                    text: "" + state.time_display
                     color: "#cccccc"
                     font.pixelSize: 13
                     font.bold: true
@@ -148,7 +160,7 @@ ApplicationWindow {
                 }
 
                 Label {
-                    text: state.bpm_display
+                    text: "" + state.bpm_display
                     color: "#888888"
                     font.pixelSize: 11
                     Layout.preferredWidth: 80
@@ -156,7 +168,7 @@ ApplicationWindow {
                 }
 
                 Label {
-                    text: state.time_sig_display
+                    text: "" + state.time_sig_display
                     color: "#888888"
                     font.pixelSize: 11
                     Layout.preferredWidth: 40
@@ -187,15 +199,21 @@ ApplicationWindow {
 
                 Rectangle { width: 1; height: parent.height - 4; color: "#444444" }
 
-                Button {
-                    text: "Loop"
-                    onClicked: state.toggle_loop()
-                    implicitWidth: 50
-                    implicitHeight: 28
-                    flat: true
-                    background: Rectangle {
-                        color: state.loop_enabled ? "#3a3a5c" : "transparent"
-                        radius: 3
+                Rectangle {
+                    Layout.preferredWidth: 50
+                    Layout.preferredHeight: 28
+                    radius: 3
+                    color: state.loop_enabled ? "#3a3a5c" : "transparent"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Loop"
+                        color: "#cccccc"
+                        font.pixelSize: 12
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: state.toggle_loop()
                     }
                 }
 
@@ -209,39 +227,57 @@ ApplicationWindow {
                     flat: true
                 }
 
-                Button {
-                    text: "Pool"
-                    onClicked: transport.toggle_pool()
-                    implicitWidth: 50
-                    implicitHeight: 28
-                    flat: true
-                    background: Rectangle {
-                        color: poolVisible ? "#1a3a5c" : "transparent"
-                        radius: 3
+                Rectangle {
+                    Layout.preferredWidth: 50
+                    Layout.preferredHeight: 28
+                    radius: 3
+                    color: poolVisible ? "#1a3a5c" : "transparent"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Pool"
+                        color: "#cccccc"
+                        font.pixelSize: 12
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: transport.toggle_pool()
                     }
                 }
 
-                Button {
-                    text: "FX"
-                    onClicked: { fxVisible = !fxVisible }
-                    implicitWidth: 40
-                    implicitHeight: 28
-                    flat: true
-                    background: Rectangle {
-                        color: fxVisible ? "#3a5c3a" : "transparent"
-                        radius: 3
+                Rectangle {
+                    Layout.preferredWidth: 40
+                    Layout.preferredHeight: 28
+                    radius: 3
+                    color: fxVisible ? "#3a5c3a" : "transparent"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "FX"
+                        color: "#cccccc"
+                        font.pixelSize: 12
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: { fxVisible = !fxVisible }
                     }
                 }
 
-                Button {
-                    text: "Mixer"
-                    onClicked: { mixerVisible = !mixerVisible }
-                    implicitWidth: 50
-                    implicitHeight: 28
-                    flat: true
-                    background: Rectangle {
-                        color: mixerVisible ? "#3a3a1a" : "transparent"
-                        radius: 3
+                Rectangle {
+                    Layout.preferredWidth: 50
+                    Layout.preferredHeight: 28
+                    radius: 3
+                    color: mixerVisible ? "#3a3a1a" : "transparent"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Mixer"
+                        color: "#cccccc"
+                        font.pixelSize: 12
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: { mixerVisible = !mixerVisible }
                     }
                 }
             }
@@ -330,7 +366,9 @@ ApplicationWindow {
                 }
 
                 function updatePool(jsonStr) {
-                    var data = JSON.parse(jsonStr)
+                    var data
+                    try { data = JSON.parse(jsonStr) } catch (e) { return }
+                    if (!Array.isArray(data)) return
                     poolListModel.clear()
                     for (var i = 0; i < data.length; i++) {
                         poolListModel.append({
@@ -537,7 +575,7 @@ ApplicationWindow {
                             y: tl.drag_overlay_y
                             width: tl.drag_overlay_w
                             height: tl.drag_overlay_h
-                            color: tl.drag_overlay_color
+                            color: "#88ccff"
                             opacity: 0.35
                             border.color: "#ffffff"
                             border.width: 1
@@ -720,7 +758,7 @@ ApplicationWindow {
                             }
                             Item { Layout.fillWidth: true }
                             Text {
-                                text: fxTitle
+                                text: fxArea.fxTitle
                                 color: "#cccccc"
                                 font.pixelSize: 11
                                 font.bold: true
@@ -771,7 +809,7 @@ ApplicationWindow {
                                 color: "transparent"
                                 CheckBox {
                                     text: "Bypassed"
-                                    checked: fxBypassed
+                                    checked: fxArea.fxBypassed
                                     font.pixelSize: 10
                                     onCheckedChanged: {
                                         if (!pressed) { return }
@@ -834,7 +872,7 @@ ApplicationWindow {
                                         anchors.left: parent.left
                                         anchors.leftMargin: 60
                                         anchors.verticalCenter: parent.verticalCenter
-                                        width: Math.min(Math.max(-grValue / 60.0 * (parent.width - 80), 0), parent.width - 80)
+                                        width: Math.min(Math.max(-fxArea.grValue / 60.0 * (parent.width - 80), 0), parent.width - 80)
                                         height: 10
                                         color: "#44aa44"
                                         radius: 2
@@ -849,7 +887,8 @@ ApplicationWindow {
                 ListModel { id: paramModel }
 
                 function updateEffect(jsonStr) {
-                    var data = JSON.parse(jsonStr)
+                    var data
+                    try { data = JSON.parse(jsonStr) } catch (e) { return }
                     if (!data.title) {
                         fxTitle = ""
                         fxBypassed = false
@@ -878,17 +917,13 @@ ApplicationWindow {
                     }
                 }
 
-                onGrValueChanged: {
-                    // GR text is bound below
-                }
-
                 Connections {
                     target: fx
                     function onEffect_jsonChanged() { fxArea.updateEffect(fx.effect_json) }
                 }
                 Connections {
                     target: fx
-                    function onCompressor_grChanged() { grValue = fx.compressor_gr }
+                    function onCompressor_grChanged() { fxArea.grValue = fx.compressor_gr }
                 }
 
                 Component.onCompleted: fx.refresh()
@@ -1130,7 +1165,8 @@ ApplicationWindow {
             ListModel { id: stripModel }
 
             function buildStrips(jsonStr) {
-                var data = JSON.parse(jsonStr)
+                var data
+                try { data = JSON.parse(jsonStr) } catch (e) { return }
                 if (!Array.isArray(data)) { return }
 
                 var needsRebuild = (stripModel.count !== data.length)

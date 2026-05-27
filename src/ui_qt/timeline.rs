@@ -18,7 +18,6 @@ pub mod timeline_bridge {
         #[qproperty(f64, drag_overlay_h)]
         #[qproperty(i32, cursor_type)]
         #[qproperty(String, timeline_json)]
-        #[qproperty(String, drag_overlay_color)]
         type TimelineModel = super::TimelineModelRust;
 
         #[qinvokable]
@@ -49,7 +48,6 @@ pub struct TimelineModelRust {
     drag_overlay_h: f64,
     cursor_type: i32,
     timeline_json: String,
-    drag_overlay_color: String,
     pub(crate) drag: std::sync::Arc<std::sync::Mutex<Option<crate::app::drag::DragState>>>,
     pub(crate) automation_drag: std::sync::Arc<std::sync::Mutex<Option<crate::app::drag::AutomationDragState>>>,
     pub(crate) cached_sr: std::sync::Arc<std::sync::Mutex<u32>>,
@@ -68,7 +66,6 @@ impl Default for TimelineModelRust {
             drag_overlay_h: 0.0,
             cursor_type: 0,
             timeline_json: String::from("{}"),
-            drag_overlay_color: String::from("#ffffff"),
             drag: std::sync::Arc::new(std::sync::Mutex::new(None)),
             automation_drag: std::sync::Arc::new(std::sync::Mutex::new(None)),
             cached_sr: std::sync::Arc::new(std::sync::Mutex::new(44100)),
@@ -216,7 +213,6 @@ impl timeline_bridge::TimelineModel {
                 self.as_mut().set_drag_overlay_y(track_y);
                 self.as_mut().set_drag_overlay_w(clip_w);
                 self.as_mut().set_drag_overlay_h(clip_h);
-                self.as_mut().set_drag_overlay_color(String::from("#88ccff"));
                 self.as_mut().set_cursor_type(5);
                 return;
             }
